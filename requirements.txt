@@ -1,0 +1,15 @@
+# Web framework for Python
+eel==0.16.0
+
+# Web server (required by eel)
+bottle==0.12.25
+
+# Async support (required by eel)
+gevent==23.9.1
+greenlet==2.0.2
+
+# Color support for terminal
+colorama==0.4.6
+
+# Type hints
+typing-extensions==4.8.0
