@@ -1,13 +1,13 @@
 {
   "nodes": [
     {
-      "id": "node-1778348024539-p30b4vyjb",
+      "id": 1,
       "type": "StudentGenerator",
       "name": "StudentGenerator",
       "icon": "🎓",
       "description": "Generate random student data with name, gender, age, height, and weight",
-      "x": 100,
-      "y": 100,
+      "x": 365.7142857142857,
+      "y": -149.85714285714283,
       "inputs": [],
       "outputs": [
         {
@@ -19,13 +19,13 @@
       "locked": false
     },
     {
-      "id": "node-1778348026730-9mz1bg2b0",
+      "id": 2,
       "type": "AgeStats",
       "name": "AgeStats",
       "icon": "📅",
       "description": "Calculate age statistics (min, max, avg) from student data",
-      "x": 342.22222222222223,
-      "y": 272.22222222222223,
+      "x": 600.8571428571428,
+      "y": -29.285714285714292,
       "inputs": [
         {
           "name": "students",
@@ -42,13 +42,13 @@
       "locked": false
     },
     {
-      "id": "node-1778382190216-mxfh7eacz",
+      "id": 3,
       "type": "HeightWeightStats",
       "name": "HeightWeightStats",
       "icon": "📏",
       "description": "Calculate height and weight statistics from student data",
-      "x": 338.8888888888889,
-      "y": 431.1111111111111,
+      "x": 597.1428571428571,
+      "y": 131.42857142857142,
       "inputs": [
         {
           "name": "students",
@@ -65,13 +65,13 @@
       "locked": false
     },
     {
-      "id": "node-1778382197512-f4d3v0v8o",
+      "id": 4,
       "type": "GenderStats",
       "name": "GenderStats",
       "icon": "⚧",
       "description": "Calculate gender distribution statistics from student data",
-      "x": 341.11111111111114,
-      "y": 605.5555555555555,
+      "x": 600,
+      "y": 294,
       "inputs": [
         {
           "name": "students",
@@ -88,13 +88,13 @@
       "locked": false
     },
     {
-      "id": "node-1778402752343-pm0wmuy8i",
+      "id": 5,
       "type": "StudentReporter",
       "name": "StudentReporter",
       "icon": "📋",
       "description": "Generate comprehensive report combining all statistics",
-      "x": 625.5555555555557,
-      "y": 97.77777777777777,
+      "x": 833.2857142857143,
+      "y": -134.04761904761904,
       "inputs": [
         {
           "name": "students",
@@ -126,11 +126,11 @@
   "connections": [
     {
       "from": {
-        "node": "node-1778348024539-p30b4vyjb",
+        "node": 1,
         "port": "students"
       },
       "to": {
-        "node": "node-1778348026730-9mz1bg2b0",
+        "node": 2,
         "port": "students"
       },
       "description": "",
@@ -138,11 +138,11 @@
     },
     {
       "from": {
-        "node": "node-1778348024539-p30b4vyjb",
+        "node": 1,
         "port": "students"
       },
       "to": {
-        "node": "node-1778382190216-mxfh7eacz",
+        "node": 3,
         "port": "students"
       },
       "description": "",
@@ -150,11 +150,11 @@
     },
     {
       "from": {
-        "node": "node-1778348024539-p30b4vyjb",
+        "node": 1,
         "port": "students"
       },
       "to": {
-        "node": "node-1778382197512-f4d3v0v8o",
+        "node": 4,
         "port": "students"
       },
       "description": "",
@@ -162,11 +162,11 @@
     },
     {
       "from": {
-        "node": "node-1778348026730-9mz1bg2b0",
+        "node": 2,
         "port": "age_stats"
       },
       "to": {
-        "node": "node-1778402752343-pm0wmuy8i",
+        "node": 5,
         "port": "age_stats"
       },
       "description": "",
@@ -174,11 +174,11 @@
     },
     {
       "from": {
-        "node": "node-1778382190216-mxfh7eacz",
+        "node": 3,
         "port": "hw_stats"
       },
       "to": {
-        "node": "node-1778402752343-pm0wmuy8i",
+        "node": 5,
         "port": "hw_stats"
       },
       "description": "",
@@ -186,11 +186,11 @@
     },
     {
       "from": {
-        "node": "node-1778382197512-f4d3v0v8o",
+        "node": 4,
         "port": "gender_stats"
       },
       "to": {
-        "node": "node-1778402752343-pm0wmuy8i",
+        "node": 5,
         "port": "gender_stats"
       },
       "description": "",
@@ -198,16 +198,16 @@
     },
     {
       "from": {
-        "node": "node-1778348024539-p30b4vyjb",
+        "node": 1,
         "port": "students"
       },
       "to": {
-        "node": "node-1778402752343-pm0wmuy8i",
+        "node": 5,
         "port": "students"
       },
       "description": "",
       "enabled": true
     }
   ],
-  "savedAt": "2026-07-06T13:10:40.867Z"
+  "savedAt": "2026-07-23T19:55:26.131Z"
 }

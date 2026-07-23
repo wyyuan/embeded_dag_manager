@@ -12,18 +12,22 @@ __pycache__/
 # Data directories - contains cache and generated files
 data/
 
-# Git directory
-.git/
+# Cache directories
+cache/
 
 # Log files
 *.log
 logs/
+
+# Git directory
+.git/
 
 # IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 *~
 
 # OS generated files

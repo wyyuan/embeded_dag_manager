@@ -9,6 +9,8 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.1;
 
+let nodeIdCounter = 0;
+
 let isPanning = false;
 let panStartX = 0;
 let panStartY = 0;
@@ -117,7 +119,7 @@ function createNode(typeId, name, icon) {
     const nodeType = nodeTypes.find(t => t.id === typeId);
     if (!nodeType) return;
     
-    const id = 'node-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    const id = ++nodeIdCounter;
     const canvasRect = document.getElementById('canvas-container').getBoundingClientRect();
     
     const centerX = (canvasRect.width / 2 - panOffsetX) / currentZoom;
@@ -163,7 +165,7 @@ function renderNode(node) {
         outputsHtml += `<div class="port port-output"><div class="port-name">${node.outputs[i].name}</div><div class="port-circle" data-node="${node.id}" data-port="${node.outputs[i].name}" data-type="output"></div></div>`;
     }
 
-    div.innerHTML = `<div class="node-header"><div class="node-title">${node.icon} ${node.name}</div><button class="node-delete" onclick="event.stopPropagation(); deleteNode('${node.id}')">×</button></div><div class="node-body"><div class="port-section"><div class="port-section-title">Inputs</div>${inputsHtml}</div><div class="port-section"><div class="port-section-title">Outputs</div>${outputsHtml}</div></div>`;
+    div.innerHTML = `<div class="node-header"><div class="node-title">${node.icon} ${node.name}</div></div><div class="node-body"><div class="port-section"><div class="port-section-title">Inputs</div>${inputsHtml}</div><div class="port-section"><div class="port-section-title">Outputs</div>${outputsHtml}</div></div>`;
 
     document.getElementById('canvas').appendChild(div);
 
@@ -328,15 +330,55 @@ function savePipeline() {
         savedAt: new Date().toISOString()
     };
     
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pipeline.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // If running via eel and we have a workspace, save directly to file
+    if (window.eel && eel.save_pipeline) {
+        addLog('Saving pipeline...', 'info');
+        eel.save_pipeline(data)(
+            function(result) {
+                console.log('Save result:', result);
+                if (result.success) {
+                    addLog(`Pipeline saved successfully to: ${result.path}`, 'success');
+                } else {
+                    addLog(`Save failed: ${result.error || 'Unknown error'}`, 'error');
+                    // Fallback to download
+                    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'workspace.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+            },
+            function(error) {
+                console.error('Save failed:', error);
+                addLog(`Save failed: ${error}`, 'error');
+                // Fallback to download
+                const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'workspace.json';
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 URL.revokeObjectURL(url);
+            }
+        );
+    } else {
+        // Standalone mode: download
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'workspace.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
 }
 
 function loadPipeline() {
@@ -352,6 +394,7 @@ function loadPipeline() {
                     const data = JSON.parse(event.target.result);
                     nodes = data.nodes || [];
                     connections = data.connections || [];
+                    syncNodeIdCounter();
                     
                     const allNodes = document.querySelectorAll('.node');
                     for (let i = 0; i < allNodes.length; i++) {
@@ -380,6 +423,7 @@ function clearCanvas() {
     if (confirm('Clear all?')) {
         nodes = [];
         connections = [];
+        nodeIdCounter = 0;
         selectedNode = null;
         selectedConnection = null;
         const allNodes = document.querySelectorAll('.node');
@@ -572,6 +616,14 @@ function initOutputResize() {
     });
 }
 
+function syncNodeIdCounter() {
+    for (const node of nodes) {
+        if (typeof node.id === 'number' && node.id > nodeIdCounter) {
+            nodeIdCounter = node.id;
+        }
+    }
+}
+
 function runPipeline() {
     const statusBar = document.getElementById('status-bar');
     const statusDot = statusBar.querySelector('.status-dot');
@@ -631,13 +683,143 @@ function runPipeline() {
     }
 }
 
+function runSingleNode(nodeId) {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) {
+        addLogRaw('Error: Node not found');
+        return;
+    }
+    
+    const statusBar = document.getElementById('status-bar');
+    const statusDot = statusBar.querySelector('.status-dot');
+    
+    const data = {
+        nodes: nodes,
+        connections: connections,
+        savedAt: new Date().toISOString()
+    };
+    
+    statusDot.style.background = '#ed8936';
+    statusBar.querySelector('.status-item:first-child span:last-child').textContent = `Running ${node.name}...`;
+    
+    addLogRaw(`Starting single node: ${node.name} (${nodeId})...`);
+    
+    if (window.eel) {
+        eel.run_single_node(data, nodeId)(
+            function success(result) {
+                console.log('Received result:', result);
+                
+                if (result.success) {
+                    statusDot.style.background = '#48bb78';
+                    statusBar.querySelector('.status-item:first-child span:last-child').textContent = 'Completed';
+                    
+                    addLogRaw('Single node run completed successfully!');
+                    
+                    if (result.output) {
+                        const lines = result.output.split('\n');
+                        for (const line of lines) {
+                            if (line.trim()) {
+                                addLogRaw(line);
+                            }
+                        }
+                    }
+                } else {
+                    statusDot.style.background = '#f56565';
+                    statusBar.querySelector('.status-item:first-child span:last-child').textContent = 'Error';
+                    addLogRaw('Error: ' + (result.error || 'Unknown error'));
+                }
+                
+                setTimeout(() => {
+                    statusDot.style.background = '#48bb78';
+                    statusBar.querySelector('.status-item:first-child span:last-child').textContent = 'Ready';
+                }, 3000);
+            },
+            function error(error) {
+                console.error('Eel call failed:', error);
+                addLogRaw('Eel call failed: ' + error);
+                statusDot.style.background = '#f56565';
+                statusBar.querySelector('.status-item:first-child span:last-child').textContent = 'Error';
+            }
+        );
+    } else {
+        addLogRaw('eel not available - running in standalone mode');
+        statusDot.style.background = '#48bb78';
+        statusBar.querySelector('.status-item:first-child span:last-child').textContent = 'Ready';
+    }
+}
+
+function openNodeCache(nodeId, nodeName) {
+    if (window.eel) {
+        eel.open_node_cache_folder(nodeId, nodeName)();
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    setTheme(isNightTime());
+    // Disable auto dark mode detection - always start with light theme
+    setTheme(false);
     loadNodeTypes().then(() => {
-        loadFromStorage();
+        // Try to load saved pipeline from workspace if available
+        if (window.eel && eel.get_saved_pipeline) {
+            eel.get_saved_pipeline()(
+                function(result) {
+                    console.log('Received saved pipeline:', result);
+                    if (result.success && result.data && result.data.nodes) {
+                        nodes = result.data.nodes || [];
+                        connections = result.data.connections || [];
+                        syncNodeIdCounter();
+                        
+                        // Render all nodes
+                        const allNodes = document.querySelectorAll('.node');
+                        for (let i = 0; i < allNodes.length; i++) {
+                            allNodes[i].remove();
+                        }
+                        for (let i = 0; i < nodes.length; i++) {
+                            renderNode(nodes[i]);
+                        }
+                        
+                        // Auto pan to center the nodes
+                        if (nodes.length > 0) {
+                            let minX = Infinity, minY = Infinity;
+                            let maxX = -Infinity, maxY = -Infinity;
+                            for (const node of nodes) {
+                                if (typeof node.x === 'number' && node.x < minX) minX = node.x;
+                                if (typeof node.y === 'number' && node.y < minY) minY = node.y;
+                                if (typeof node.x === 'number' && node.x + 170 > maxX) maxX = node.x + 170;
+                                if (typeof node.y === 'number' && node.y + 100 > maxY) maxY = node.y + 100;
+                            }
+                            
+                            const canvasContainer = document.getElementById('canvas-container');
+                            const centerX = (minX + maxX) / 2;
+                            const centerY = (minY + maxY) / 2;
+                            const canvasWidth = canvasContainer.offsetWidth;
+                            const canvasHeight = canvasContainer.offsetHeight;
+                            
+                            panOffsetX = canvasWidth / 2 - centerX * currentZoom;
+                            panOffsetY = canvasHeight / 2 - centerY * currentZoom;
+                        }
+                        
+                        // Defer rendering to next frame so browser finishes reflow
+                        setTimeout(() => {
+                            applyTransform();
+                            updateConnections();
+                            updateStats();
+                            renderConnectionsList();
+                            console.log('Loaded saved pipeline from workspace:', nodes.length, 'nodes');
+                        }, 0);
+                    } else {
+                        loadFromStorage();
+                    }
+                },
+                function(error) {
+                    console.error('Failed to get saved pipeline:', error);
+                    loadFromStorage();
+                }
+            );
+        } else {
+            loadFromStorage();
+        }
     });
     
-    applyTransform();
     updateStats();
     initResizeHandlers();
     initOutputResize();

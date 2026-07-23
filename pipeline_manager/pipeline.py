@@ -190,6 +190,9 @@ class Pipeline:
         # 将 stages 转换为列表，确保可多次迭代
         self.stages = list(stages)
 
+        # 前端节点ID到 stage 实例的映射（用于运行单个节点）
+        self._node_frontend_id_map: Dict[str, 'CachedSubprocess'] = {}
+
         # 创建日志目录
         self.log_dir = os.path.join(working_folder, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
@@ -325,6 +328,62 @@ class Pipeline:
                 sys.stdout = self.original_stdout
                 print(f"[INFO] Log saved to: {self.log_file}")
 
+    def run_node_by_frontend_id(self, node_id: str):
+        """
+        启动指定前端ID的单个节点，并将输出同时写入控制台和日志文件
+
+        Args:
+            node_id: 前端节点ID（对应前端 nodes 数组中的 id 字段）
+
+        Raises:
+            ValueError: 当找不到指定ID的节点时抛出
+        """
+        stage = self._node_frontend_id_map.get(node_id)
+        if stage is None:
+            available_ids = ", ".join(self._node_frontend_id_map.keys())
+            raise ValueError(f"Node '{node_id}' not found. Available IDs: {available_ids}")
+
+        # 打开日志文件并设置输出重定向
+        with open(self.log_file, 'w', encoding='utf-8') as f:
+            # 定义 Tee 类：将输出同时写入多个流（控制台 + 文件）
+            class Tee:
+                def __init__(self, *files):
+                    self.files = files
+
+                def write(self, data):
+                    for file in self.files:
+                        file.write(data)
+                        file.flush()
+
+                def flush(self):
+                    for file in self.files:
+                        file.flush()
+
+            # 将 stdout 重定向到 Tee（同时输出到控制台和日志文件）
+            sys.stdout = Tee(self.original_stdout, f)
+
+            try:
+                # 输出执行开始信息
+                print(f"[INFO] Pipeline started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"[INFO] Working folder: {self.working_folder}")
+                print(f"[INFO] Force mode: {self.force}")
+                print(f"[INFO] Log file: {self.log_file}")
+                print("=" * 80)
+
+                # 执行指定节点
+                print(f"[INFO] Running single node: {stage.name} (frontend ID: {node_id})")
+                print(f"\n--- Stage: {stage.name} ---")
+                stage.run(force=self.force)
+
+                # 输出完成信息
+                print("\n" + "=" * 80)
+                print(f"[INFO] Node '{stage.name}' finished")
+                print(f"[INFO] Pipeline completed at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            finally:
+                # 确保恢复原始 stdout
+                sys.stdout = self.original_stdout
+                print(f"[INFO] Log saved to: {self.log_file}")
+
     def clean(self):
         """
         清理项目：删除工作目录下除 config.json 之外的所有内容
@@ -368,7 +427,6 @@ class Pipeline:
             ctx.set_shared(key, value)
 
         node_instances = {}
-        node_id_map = {}
 
         for i, node_def in enumerate(nodes, 1):
             node_type = node_def.get('type')
@@ -409,7 +467,6 @@ class Pipeline:
                 ))
 
             node_instances[node_def['id']] = instance
-            node_id_map[node_def['id']] = i
 
         for conn in connections:
             from_node_id = conn.get('from', {}).get('node')
@@ -422,11 +479,10 @@ class Pipeline:
 
             from_instance = node_instances[from_node_id]
             to_instance = node_instances[to_node_id]
-            from_id = node_id_map[from_node_id]
 
             output_path = os.path.join(
                 ctx.working_folder, 'cache',
-                f"{from_id}_{from_instance.name}",
+                f"{from_instance.id}_{from_instance.name}",
                 f"{from_port}.csv"
             )
 
@@ -435,4 +491,7 @@ class Pipeline:
                 input_port.path = output_path
 
         stages = list(node_instances.values())
-        return cls(stages, working_folder)
+        pipeline = cls(stages, working_folder)
+        # 保存前端节点ID到 stage 实例的映射
+        pipeline._node_frontend_id_map = {nid: inst for nid, inst in node_instances.items()}
+        return pipeline

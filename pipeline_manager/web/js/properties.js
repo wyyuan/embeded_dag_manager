@@ -86,6 +86,11 @@ function showProperties() {
                 ${customParamsHtml}
                 ${addParamBtn}
             </div>
+            <div class="config-section" style="display: flex; gap: 6px;">
+                <button class="btn btn-success" style="flex: 1;" onclick="runSingleNode(${selectedNode.id})">▶️ Run</button>
+                <button class="btn btn-secondary" style="flex: 1;" onclick="openNodeCache(${selectedNode.id}, '${selectedNode.name}')">📂 Cache</button>
+                <button class="btn btn-danger" style="flex: 1;" onclick="deleteNode(${selectedNode.id})">🗑️ Delete</button>
+            </div>
         `;
         return;
     }
@@ -287,6 +292,7 @@ function loadFromStorage() {
             const data = JSON.parse(saved);
             nodes = data.nodes || [];
             connections = data.connections || [];
+            syncNodeIdCounter();
             
             for (let i = 0; i < nodes.length; i++) {
                 if (nodes[i].locked === undefined) {

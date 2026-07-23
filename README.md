@@ -97,13 +97,53 @@ working folder 自动使用 `workspace.json` 所在目录，不需要额外指�
 pipeline-clean --pipeline ./my_workspace/workspace.json
 ```
 
+## 运行示例
+
+首先需要安装包：
+
+```bash
+pip install dist/pipeline_manager-0.1.0-py3-none-any.whl
+```
+
+安装完成后就可以体验示例了：
+
+```bash
+# 启动可视化编辑器，使用 demo 中的示例 workspace
+pipeline-viewer --workspace ./demo/test_workspace --port 8080
+```
+
+打开浏览器访问 http://localhost:8080 就能看到已经配置好的示例管道。
+
+运行示例管道：
+
+```bash
+pipeline-run --pipeline ./demo/test_workspace/workspace.json --force
+```
+
+清理示例缓存：
+
+```bash
+pipeline-clean --pipeline ./demo/test_workspace/workspace.json
+```
+
+示例中已经包含：
+- `demo/test_workspace/nodes.json` - 定义了 5 个示例节点类型
+- `demo/test_workspace/workspace.json` - 已经连接好的完整管道配置
+- `demo/test_workspace/cache/` - 已经缓存的执行结果
+
+**如果提示命令找不到**，说明 Python 的 Scripts 目录没有在 PATH 中，可以使用 python -m 方式运行：
+
+```bash
+python -m pipeline_manager.pipeline_viewer --workspace ./demo/test_workspace --port 8080
+```
+
 ## 命令行工具
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `pipeline-run` | 运行管道 | `pipeline-run --pipeline pipeline.json --working-folder ./workspace [-f]` |
+| `pipeline-run` | 运行管道 | `pipeline-run --pipeline ./workspace/workspace.json [-f]` |
 | `pipeline-viewer` | 启动可视化编辑器 | `pipeline-viewer --workspace ./workspace [--port 8080] [--open]` |
-| `pipeline-clean` | 清理缓存 | `pipeline-clean --pipeline pipeline.json` |
+| `pipeline-clean` | 清理缓存 | `pipeline-clean --pipeline ./workspace/workspace.json` |
 
 ### 参数说明
 
