@@ -100,6 +100,24 @@ class CachedSubprocess(ABC):
         """Absolute path for this subprocess instance's cache folder."""
         return os.path.join(self.ctx.working_folder, 'cache', f"{self.id}_{self.name}")
 
+    def require_input(self, port_name: str) -> str:
+        """Get input path, raise ValueError if not connected.
+        
+        Helper to avoid repeated "if not x: raise ValueError" boilerplate.
+        """
+        port = self.get_input(port_name)
+        if not port or not port.path:
+            raise ValueError(f"Input '{port_name}' not connected (port path not set)")
+        return port.path
+
+    def get_shared(self, key: str, default=None):
+        """Get shared global value from context."""
+        return self.ctx.get_shared(key, default)
+    
+    def set_shared(self, key: str, value):
+        """Set shared global value to context."""
+        self.ctx.set_shared(key, value)
+
     def run(self, force: bool = False):
         """Execute the stage with caching support."""
         cache_dir = self.cache_folder()
@@ -156,8 +174,8 @@ class Pipeline:
             try:
                 with open(pipeline_path, "r", encoding="utf-8") as f:
                     pipeline_data = json.load(f)
-                    # 可以从 pipeline.json 中提取额外配置
-                    # 这里只使用基本配置
+                    # 提取 globals 配置，后续会单独处理
+                    cfg.update(pipeline_data.get('globals', {}))
             except Exception as e:
                 print(f"[WARN] Failed to load pipeline.json: {e}")
         
@@ -166,6 +184,8 @@ class Pipeline:
         
         # 创建上下文对象
         self.ctx = Context(**cfg)
+        
+        # 如果 pipeline.json 包含 globals，已经通过构造参数注入到 Context dict 中
         
         # 将 stages 转换为列表，确保可多次迭代
         self.stages = list(stages)
@@ -246,104 +266,173 @@ class Pipeline:
                 sys.stdout = self.original_stdout
                 print(f"[INFO] Log saved to: {self.log_file}")
 
+    def run_stage(self, name: str):
+        """
+        启动指定名称的一个 subprocess（阶段），并将输出同时写入控制台和日志文件
 
-NODE_REGISTRY: Dict[str, type] = {}
+        Args:
+            name: 阶段名称（对应 CachedSubprocess.name）
 
+        Raises:
+            ValueError: 当找不到指定名称的阶段时抛出
+        """
+        stage = next((s for s in self.stages if s.name == name), None)
+        if stage is None:
+            available = ", ".join(s.name for s in self.stages)
+            raise ValueError(f"Stage '{name}' not found. Available stages: {available}")
 
-def register_node(cls):
-    """Decorator to register a CachedSubprocess subclass."""
-    NODE_REGISTRY[cls.__name__] = cls
-    return cls
+        # 打开日志文件并设置输出重定向
+        with open(self.log_file, 'w', encoding='utf-8') as f:
+            # 定义 Tee 类：将输出同时写入多个流（控制台 + 文件）
+            class Tee:
+                def __init__(self, *files):
+                    """初始化 Tee 对象，接受多个文件对象"""
+                    self.files = files
 
+                def write(self, data):
+                    """写入数据到所有文件，并立即刷新"""
+                    for file in self.files:
+                        file.write(data)
+                        file.flush()
 
-def load_pipeline_from_json(pipeline_path: str, working_folder: str) -> Pipeline:
-    """Load pipeline stages from a pipeline.json file."""
-    with open(pipeline_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+                def flush(self):
+                    """刷新所有文件缓冲区"""
+                    for file in self.files:
+                        file.flush()
 
-    nodes = data.get('nodes', [])
-    connections = data.get('connections', [])
+            # 将 stdout 重定向到 Tee（同时输出到控制台和日志文件）
+            sys.stdout = Tee(self.original_stdout, f)
 
-    ctx = Context(working_folder)
+            try:
+                # 输出执行开始信息
+                print(f"[INFO] Pipeline started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"[INFO] Working folder: {self.working_folder}")
+                print(f"[INFO] Force mode: {self.force}")
+                print(f"[INFO] Log file: {self.log_file}")
+                print("=" * 80)
 
-    node_instances = {}
-    node_id_map = {}
+                # 执行指定阶段
+                print(f"[INFO] Running stage: {name}")
+                print(f"\n--- Stage: {stage.name} ---")
+                stage.run(force=self.force)
 
-    for i, node_def in enumerate(nodes, 1):
-        node_type = node_def.get('type')
-        if node_type not in NODE_REGISTRY:
-            print(f"[WARN] Unknown node type: {node_type}, skipping")
-            continue
+                # 输出完成信息
+                print("\n" + "=" * 80)
+                print(f"[INFO] Stage '{name}' finished")
+                print(f"[INFO] Pipeline completed at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            finally:
+                # 确保恢复原始 stdout
+                sys.stdout = self.original_stdout
+                print(f"[INFO] Log saved to: {self.log_file}")
 
-        cls = NODE_REGISTRY[node_type]
-        instance = cls(ctx)
-        instance.id = i
+    def clean(self):
+        """
+        清理项目：删除工作目录下除 config.json 之外的所有内容
+        """
+        if not os.path.isdir(self.working_folder):
+            print(f"[INFO] {self.working_folder} not found, skipped")
+            return
+        for entry in os.listdir(self.working_folder):
+            if entry == "config.json":
+                continue
+            target = os.path.join(self.working_folder, entry)
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
+            print(f"[INFO] Removed {target}")
 
-        instance.description = node_def.get('description', '')
+    # 节点类型注册表：节点类名 -> 类对象
+    NODE_REGISTRY: Dict[str, type] = {}
 
-        for param in node_def.get('customParams', []):
-            p = next((x for x in instance.params if x.name == param.get('name')), None)
-            if p:
-                p.value = param.get('value')
+    @staticmethod
+    def register_node(cls):
+        """Decorator to register a CachedSubprocess subclass."""
+        Pipeline.NODE_REGISTRY[cls.__name__] = cls
+        return cls
 
-        instance.inputs = []
-        for inp in node_def.get('inputs', []):
-            instance.inputs.append(Input(
-                name=inp.get('name', ''),
-                description=inp.get('description', '')
-            ))
+    @classmethod
+    def load_from_json(cls, pipeline_path: str, working_folder: str) -> "Pipeline":
+        """Load pipeline stages from a pipeline.json file."""
+        with open(pipeline_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
-        instance.outputs = []
-        for outp in node_def.get('outputs', []):
-            instance.outputs.append(Output(
-                name=outp.get('name', ''),
-                description=outp.get('description', '')
-            ))
+        nodes = data.get('nodes', [])
+        connections = data.get('connections', [])
+        globals_dict = data.get('globals', {})
 
-        instance.params = []
-        for param in node_def.get('customParams', []):
-            instance.params.append(Param(
-                name=param.get('name', ''),
-                value=param.get('value')
-            ))
+        ctx = Context(working_folder)
+        
+        # 将全局配置写入 Context 的共享缓存
+        for key, value in globals_dict.items():
+            ctx.set_shared(key, value)
 
-        node_instances[node_def['id']] = instance
-        node_id_map[node_def['id']] = i
+        node_instances = {}
+        node_id_map = {}
 
-    for conn in connections:
-        from_node_id = conn.get('from', {}).get('node')
-        from_port = conn.get('from', {}).get('port')
-        to_node_id = conn.get('to', {}).get('node')
-        to_port = conn.get('to', {}).get('port')
+        for i, node_def in enumerate(nodes, 1):
+            node_type = node_def.get('type')
+            if node_type not in cls.NODE_REGISTRY:
+                print(f"[WARN] Unknown node type: {node_type}, skipping")
+                continue
 
-        if from_node_id not in node_instances or to_node_id not in node_instances:
-            continue
+            node_cls = cls.NODE_REGISTRY[node_type]
+            instance = node_cls(ctx)
+            instance.id = i
 
-        from_instance = node_instances[from_node_id]
-        to_instance = node_instances[to_node_id]
-        from_id = node_id_map[from_node_id]
+            instance.description = node_def.get('description', '')
 
-        output_path = os.path.join(
-            ctx.working_folder, 'cache',
-            f"{from_id}_{from_instance.name}",
-            f"{from_port}.csv"
-        )
+            for param in node_def.get('customParams', []):
+                p = next((x for x in instance.params if x.name == param.get('name')), None)
+                if p:
+                    p.value = param.get('value')
 
-        input_port = to_instance.get_input(to_port)
-        if input_port:
-            input_port.path = output_path
+            instance.inputs = []
+            for inp in node_def.get('inputs', []):
+                instance.inputs.append(Input(
+                    name=inp.get('name', ''),
+                    description=inp.get('description', '')
+                ))
 
-    stages = list(node_instances.values())
-    return Pipeline(stages, working_folder)
+            instance.outputs = []
+            for outp in node_def.get('outputs', []):
+                instance.outputs.append(Output(
+                    name=outp.get('name', ''),
+                    description=outp.get('description', '')
+                ))
 
+            instance.params = []
+            for param in node_def.get('customParams', []):
+                instance.params.append(Param(
+                    name=param.get('name', ''),
+                    value=param.get('value')
+                ))
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description='Run pipeline from JSON')
-    parser.add_argument('--pipeline', '-p', required=True, help='Path to pipeline.json')
-    parser.add_argument('--working-folder', '-w', required=True, help='Working folder')
-    parser.add_argument('--force', '-f', action='store_true', help='Force re-execution')
-    args = parser.parse_args()
+            node_instances[node_def['id']] = instance
+            node_id_map[node_def['id']] = i
 
-    pipeline = load_pipeline_from_json(args.pipeline, args.working_folder)
-    pipeline.run()
+        for conn in connections:
+            from_node_id = conn.get('from', {}).get('node')
+            from_port = conn.get('from', {}).get('port')
+            to_node_id = conn.get('to', {}).get('node')
+            to_port = conn.get('to', {}).get('port')
+
+            if from_node_id not in node_instances or to_node_id not in node_instances:
+                continue
+
+            from_instance = node_instances[from_node_id]
+            to_instance = node_instances[to_node_id]
+            from_id = node_id_map[from_node_id]
+
+            output_path = os.path.join(
+                ctx.working_folder, 'cache',
+                f"{from_id}_{from_instance.name}",
+                f"{from_port}.csv"
+            )
+
+            input_port = to_instance.get_input(to_port)
+            if input_port:
+                input_port.path = output_path
+
+        stages = list(node_instances.values())
+        return cls(stages, working_folder)

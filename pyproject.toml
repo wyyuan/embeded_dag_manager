@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipeline-manager"
+version = "0.1.0"
+authors = [
+  { name="Your Name", email="your.email@example.com" }
+]
+description = "A cached pipeline execution framework with visual editor"
+license = "MIT"
+requires-python = ">=3.8"
+keywords = ["pipeline", "workflow", "caching", "data-processing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "eel>=0.16.0",
+    "bottle>=0.12.25",
+    "gevent>=23.9.1",
+    "greenlet>=2.0.2",
+    "colorama>=0.4.6",
+    "typing-extensions>=4.8.0",
+]
+
+[project.scripts]
+pipeline-run = "pipeline_manager.run:main"
+pipeline-viewer = "pipeline_manager.pipeline_viewer:main"
+pipeline-clean = "pipeline_manager.clean:main"
+
+[tool.setuptools]
+packages = ["pipeline_manager"]
+package-data = { "pipeline_manager" = ["web/*.html", "web/**/*.js"] }
+include-package-data = true

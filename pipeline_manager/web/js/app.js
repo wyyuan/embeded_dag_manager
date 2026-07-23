@@ -24,27 +24,80 @@ let resizeStartWidth = 0;
 
 function loadNodeTypes() {
     return new Promise((resolve, reject) => {
-        fetch('config/nodes.json')
-            .then(response => response.json())
-            .then(data => {
-                nodeTypes = data.nodes;
-                renderNodeTypes();
-                resolve();
-            })
-            .catch(error => {
-                console.error('Failed to load node types:', error);
-                nodeTypes = [
-                    { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
-                    { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                    { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                    { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                    { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                    { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'data'}], outputs: [] },
-                    { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
-                ];
-                renderNodeTypes();
-                resolve();
-            });
+        if (window.eel && eel.get_node_types) {
+            eel.get_node_types()(
+                function(result) {
+                    console.log('Received node types from Python:', result);
+                    if (result.success && result.data && result.data.nodes) {
+                        nodeTypes = result.data.nodes;
+                        renderNodeTypes();
+                        resolve();
+                    } else {
+                        // Fallback to default node types
+                        console.warn('No node types from Python, using defaults');
+                        nodeTypes = [
+                            { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
+                            { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                            { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                            { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                            { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                            { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'data'}], outputs: [] },
+                            { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
+                        ];
+                        renderNodeTypes();
+                        resolve();
+                    }
+                },
+                function(error) {
+                    console.error('Failed to get node types from Python:', error);
+                    // Fallback to fetch
+                    fetch('config/nodes.json')
+                        .then(response => response.json())
+                        .then(data => {
+                            nodeTypes = data.nodes;
+                            renderNodeTypes();
+                            resolve();
+                        })
+                        .catch(error => {
+                            console.error('Failed to load node types from fetch:', error);
+                            nodeTypes = [
+                                { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
+                                { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                                { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                                { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                                { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                                { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'data'}], outputs: [] },
+                                { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
+                            ];
+                            renderNodeTypes();
+                            resolve();
+                        });
+                }
+            );
+        } else {
+            // Fallback to fetch when not running via eel
+            fetch('config/nodes.json')
+                .then(response => response.json())
+                .then(data => {
+                    nodeTypes = data.nodes;
+                    renderNodeTypes();
+                    resolve();
+                })
+                .catch(error => {
+                    console.error('Failed to load node types:', error);
+                    nodeTypes = [
+                        { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
+                        { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                        { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                        { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                        { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                        { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
+                        { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
+                    ];
+                    renderNodeTypes();
+                    resolve();
+                });
+        }
     });
 }
 

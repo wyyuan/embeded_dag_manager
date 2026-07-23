@@ -1,0 +1,72 @@
+{
+    "nodes": [
+        {
+            "id": "StudentGenerator",
+            "name": "StudentGenerator",
+            "icon": "🎓",
+            "description": "Generate random student data with name, gender, age, height, and weight",
+            "inputs": [],
+            "outputs": [
+                {"name": "students", "description": "Generated student list"}
+            ],
+            "params": [
+                {"name": "count", "description": "Number of students to generate", "type": "int", "value": 10}
+            ]
+        },
+        {
+            "id": "AgeStats",
+            "name": "AgeStats",
+            "icon": "📅",
+            "description": "Calculate age statistics (min, max, avg) from student data",
+            "inputs": [
+                {"name": "students", "description": "Student list"}
+            ],
+            "outputs": [
+                {"name": "age_stats", "description": "Age statistics"}
+            ],
+            "params": []
+        },
+        {
+            "id": "HeightWeightStats",
+            "name": "HeightWeightStats",
+            "icon": "📏",
+            "description": "Calculate height and weight statistics from student data",
+            "inputs": [
+                {"name": "students", "description": "Student list"}
+            ],
+            "outputs": [
+                {"name": "hw_stats", "description": "Height and weight statistics"}
+            ],
+            "params": []
+        },
+        {
+            "id": "GenderStats",
+            "name": "GenderStats",
+            "icon": "⚧",
+            "description": "Calculate gender distribution statistics from student data",
+            "inputs": [
+                {"name": "students", "description": "Student list"}
+            ],
+            "outputs": [
+                {"name": "gender_stats", "description": "Gender distribution statistics"}
+            ],
+            "params": []
+        },
+        {
+            "id": "StudentReporter",
+            "name": "StudentReporter",
+            "icon": "📋",
+            "description": "Generate comprehensive report combining all statistics",
+            "inputs": [
+                {"name": "students", "description": "Student list"},
+                {"name": "age_stats", "description": "Age statistics"},
+                {"name": "hw_stats", "description": "Height/weight statistics"},
+                {"name": "gender_stats", "description": "Gender statistics"}
+            ],
+            "outputs": [
+                {"name": "report", "description": "Final comprehensive report"}
+            ],
+            "params": []
+        }
+    ]
+}
