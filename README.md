@@ -9,6 +9,8 @@
 - 📦 **模块化设计** - 继承 `CachedSubprocess` 轻松自定义节点
 - 🔧 **灵活配置** - `nodes.json` 在每个 workspace 自定义节点类型
 - 📝 **日志记录** - 自动记录执行日志到文件
+- ▶️ **单节点运行** - 在编辑器中选中节点单独运行调试
+- 📂 **缓存浏览** - 一键打开节点缓存目录
 
 ## 安装
 
@@ -81,6 +83,10 @@ my_workspace/
 pipeline-viewer --workspace ./my_workspace --port 8080
 ```
 
+> **注意**：`pipeline-viewer` 是通用框架入口，不包含任何业务节点。
+> 你需要在启动前导入自定义节点类（通过 `@Pipeline.register_node` 注册），
+> 或者使用启动脚本的方式（参考 `demo/run_demo.py`）。
+
 然后打开浏览器访问 http://localhost:8080 即可开始编辑。
 
 ### 5. 命令行运行管道
@@ -105,36 +111,29 @@ pipeline-clean --pipeline ./my_workspace/workspace.json
 pip install dist/pipeline_manager-0.1.0-py3-none-any.whl
 ```
 
-安装完成后就可以体验示例了：
+安装完成后使用启动脚本体验示例：
 
 ```bash
-# 启动可视化编辑器，使用 demo 中的示例 workspace
-pipeline-viewer --workspace ./demo/test_workspace --port 8080
+# 使用启动脚本（自动注册 demo 节点并启动编辑器）
+python demo/run_demo.py
 ```
 
-打开浏览器访问 http://localhost:8080 就能看到已经配置好的示例管道。
-
-运行示例管道：
+或者源码运行（无需安装）：
 
 ```bash
-pipeline-run --pipeline ./demo/test_workspace/workspace.json --force
-```
-
-清理示例缓存：
-
-```bash
-pipeline-clean --pipeline ./demo/test_workspace/workspace.json
+cd pipeline_manager
+python demo/run_demo.py
 ```
 
 示例中已经包含：
 - `demo/test_workspace/nodes.json` - 定义了 5 个示例节点类型
 - `demo/test_workspace/workspace.json` - 已经连接好的完整管道配置
-- `demo/test_workspace/cache/` - 已经缓存的执行结果
+- `demo/demo_nodes.py` - 5 个示例节点的 Python 实现
 
 **如果提示命令找不到**，说明 Python 的 Scripts 目录没有在 PATH 中，可以使用 python -m 方式运行：
 
 ```bash
-python -m pipeline_manager.pipeline_viewer --workspace ./demo/test_workspace --port 8080
+python -m pipeline_manager.pipeline_viewer --workspace ./my_workspace --port 8080
 ```
 
 ## 命令行工具
@@ -170,6 +169,9 @@ from pipeline_manager import Pipeline, CachedSubprocess
 # 从 JSON 加载管道
 pipeline = Pipeline.load_from_json("workspace.json", "./workspace")
 pipeline.run()
+
+# 运行单个节点（按前端节点 ID）
+pipeline.run_node_by_frontend_id(1)
 ```
 
 ## 项目结构
@@ -184,15 +186,15 @@ pipeline_manager/
 │   ├── clean.py            # pipeline-clean 命令入口
 │   └── web/                 # Web 静态资源
 │       ├── index.html
-│       ├── test.html
 │       └── js/
 │           ├── app.js
 │           ├── connections.js
 │           └── properties.js
 ├── demo/                    # 示例工作区（不会打包进 wheel）
+│   ├── demo_nodes.py        # 示例节点 Python 实现
+│   ├── run_demo.py          # 示例启动脚本
 │   ├── pipeline_workspace/
-│   │   ├── nodes.json
-│   │   └── workspace.json
+│   │   └── nodes.json
 │   └── test_workspace/
 │       ├── nodes.json
 │       └── workspace.json
