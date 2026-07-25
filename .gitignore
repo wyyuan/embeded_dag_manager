@@ -12,8 +12,13 @@ __pycache__/
 # Data directories - contains cache and generated files
 data/
 
-# Cache directories
+# Cache directories (all levels)
 cache/
+**/cache/
+
+# Demo workspace cache and logs
+demo/test_workspace/cache/
+demo/test_workspace/logs/
 
 # Log files
 *.log
