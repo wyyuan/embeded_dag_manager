@@ -4,6 +4,8 @@ import csv
 import shutil
 import datetime
 import sys
+import inspect
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, Callable, Any, List, Optional, Literal
@@ -406,7 +408,129 @@ class Pipeline:
 
     @staticmethod
     def register_node(cls):
-        """Decorator to register a CachedSubprocess subclass."""
+        """Decorator to register a CachedSubprocess subclass with trait injection.
+
+        Supports two convenience features:
+
+        1. Class-level declarative traits:
+           Declare ``inputs`` / ``outputs`` / ``params`` as class attributes and
+           they will be deep-copied into each instance automatically, so you do
+           not need to assign them inside ``__init__``.
+
+        2. Simplified ``__init__`` signature:
+           You may write ``def __init__(self, ctx):`` without the ``id``
+           parameter.  The decorator normalises the signature so the class is
+           still constructible as ``Cls(ctx, id=...)`` / ``Cls(ctx)``.
+
+        Example::
+
+            @Pipeline.register_node
+            class CloneSolution(CachedSubprocess):
+                inputs = [Input("solution_json")]
+                outputs = [Output("clones")]
+                params = [Param("multiplier", value=1, param_type="int")]
+
+                def __init__(self, ctx):
+                    super().__init__(ctx)
+        """
+        if not issubclass(cls, CachedSubprocess):
+            raise TypeError(
+                f"@Pipeline.register_node can only decorate CachedSubprocess "
+                f"subclasses, got {cls.__name__}"
+            )
+
+        # ---- Collect class-level declarative traits -------------------------
+        # Use vars(cls) instead of getattr so we only pick *direct* class
+        # attributes and don't accidentally pull them from CachedSubprocess.
+        declared_inputs = vars(cls).get("inputs", None)
+        declared_outputs = vars(cls).get("outputs", None)
+        declared_params = vars(cls).get("params", None)
+
+        # ---- Inspect original __init__ signature ----------------------------
+        original_init = cls.__init__
+        init_sig = inspect.signature(original_init)
+        init_param_names = list(init_sig.parameters.keys())
+
+        # Does the user-defined __init__ accept an `id` argument?
+        # Skip "self"; accept both positional and keyword forms.
+        rest_names = [n for n in init_param_names if n != "self"]
+        accepts_id = "id" in rest_names
+
+        # ---- Build injected __init__ wrapper --------------------------------
+        def _wrapped_init(self, ctx: Context, id: Optional[int] = None, **kwargs):
+            # Decide which id to use ONCE up front.  If the user later calls
+            # ``super().__init__(ctx)`` without an ``id`` argument it will
+            # overwrite self.id with a freshly generated one — we restore our
+            # chosen id at the very end, below.
+            if id is None:
+                target_id = Context.generate_id()
+            else:
+                target_id = id
+
+            # 1. Run the base-class constructor first so that `inputs`/`outputs`/
+            #    `params` are initialised as empty lists (guaranteed by
+            #    CachedSubprocess.__init__).  We always pass the explicit
+            #    target_id whether the user subclass accepts it or not.
+            #
+            #    NOTE: we intentionally do the base init here and NOT rely on
+            #    the user to call ``super().__init__(ctx, id)``, because if the
+            #    user does call it later (which is still perfectly valid) it
+            #    will only overwrite id/ctx/inputs/outputs/params with the same
+            #    values or reset the lists to ``[]`` — we therefore perform
+            #    declarative-trait injection and id-restoration *after* user
+            #    __init__ has had a chance to run.
+            CachedSubprocess.__init__(self, ctx=ctx, id=target_id)
+
+            # 2. Call the user's __init__ with a compatible argument list.
+            #    Users may still call ``super().__init__(ctx[, id])`` themselves
+            #    for style or legacy reasons; that only resets the field lists
+            #    to empty and potentially overwrites self.id, both of which we
+            #    repair below.
+            if accepts_id:
+                # Original is `def __init__(self, ctx, id=None): ...` — pass both
+                original_init(self, ctx, id=target_id, **kwargs)
+            else:
+                # Original is the simplified `def __init__(self, ctx): ...`
+                original_init(self, ctx, **kwargs)
+
+            # 3. Restore the authoritative id and inject declarative traits
+            #    AFTER the user's __init__ returns.  This guards against a
+            #    ``super().__init__(ctx)`` call (without `id`) inside the user
+            #    constructor, which would otherwise clobber the id that was
+            #    passed to the wrapper.
+            self.id = target_id
+
+            # Deep copy so each instance owns its own Input/Output/Param
+            # objects and modifying one instance does not affect others or
+            # the class defaults.
+            if declared_inputs is not None:
+                self.inputs = [copy.deepcopy(p) for p in declared_inputs]
+            if declared_outputs is not None:
+                self.outputs = [copy.deepcopy(p) for p in declared_outputs]
+            if declared_params is not None:
+                self.params = [copy.deepcopy(p) for p in declared_params]
+
+        # Preserve metadata so introspection / debugging stays friendly.
+        _wrapped_init.__name__ = original_init.__name__
+        _wrapped_init.__qualname__ = original_init.__qualname__
+        _wrapped_init.__doc__ = original_init.__doc__
+        _wrapped_init.__module__ = original_init.__module__
+        try:
+            _wrapped_init.__signature__ = init_sig.replace(
+                parameters=[
+                    inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                    inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                      annotation=Context),
+                    inspect.Parameter("id", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                      default=None, annotation=Optional[int]),
+                ]
+            )
+        except (ValueError, TypeError):
+            pass
+
+        cls.__init__ = _wrapped_init
+
+        # ---- Register and return -------------------------------------------
         Pipeline.NODE_REGISTRY[cls.__name__] = cls
         return cls
 
@@ -440,31 +564,50 @@ class Pipeline:
 
             instance.description = node_def.get('description', '')
 
-            for param in node_def.get('customParams', []):
-                p = next((x for x in instance.params if x.name == param.get('name')), None)
-                if p:
-                    p.value = param.get('value')
-
-            instance.inputs = []
+            # --- Update existing declarative inputs (append new if missing) ---
+            declared_input_names = {p.name for p in instance.inputs}
             for inp in node_def.get('inputs', []):
-                instance.inputs.append(Input(
-                    name=inp.get('name', ''),
-                    description=inp.get('description', '')
-                ))
+                name = inp.get('name', '')
+                existing = next((p for p in instance.inputs if p.name == name), None)
+                if existing:
+                    existing.description = inp.get('description', existing.description)
+                else:
+                    instance.inputs.append(Input(
+                        name=name,
+                        description=inp.get('description', '')
+                    ))
 
-            instance.outputs = []
+            # --- Update existing declarative outputs (append new if missing) ---
+            declared_output_names = {p.name for p in instance.outputs}
             for outp in node_def.get('outputs', []):
-                instance.outputs.append(Output(
-                    name=outp.get('name', ''),
-                    description=outp.get('description', '')
-                ))
+                name = outp.get('name', '')
+                existing = next((p for p in instance.outputs if p.name == name), None)
+                if existing:
+                    existing.description = outp.get('description', existing.description)
+                else:
+                    instance.outputs.append(Output(
+                        name=name,
+                        description=outp.get('description', '')
+                    ))
 
-            instance.params = []
+            # --- Update existing declarative params (append new if missing) ---
             for param in node_def.get('customParams', []):
-                instance.params.append(Param(
-                    name=param.get('name', ''),
-                    value=param.get('value')
-                ))
+                name = param.get('name', '')
+                existing = next((p for p in instance.params if p.name == name), None)
+                if existing:
+                    if 'value' in param and param['value'] is not None:
+                        existing.value = param['value']
+                    if 'description' in param:
+                        existing.description = param['description']
+                    if 'param_type' in param:
+                        existing.param_type = param['param_type']
+                else:
+                    instance.params.append(Param(
+                        name=name,
+                        description=param.get('description', ''),
+                        value=param.get('value'),
+                        param_type=param.get('param_type', 'string')
+                    ))
 
             node_instances[node_def['id']] = instance
 
