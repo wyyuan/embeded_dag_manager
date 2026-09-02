@@ -1,7 +1,9 @@
 """Demo node implementations for the pipeline manager test workspace.
 
-Provides concrete CachedSubprocess subclasses for the student data pipeline:
-  StudentGenerator, AgeStats, HeightWeightStats, GenderStats, StudentReporter.
+All nodes use the declarative trait-injection style: ``inputs`` / ``outputs`` /
+``params`` are declared as class-level attributes and ``@Pipeline.register_node``
+deep-copies them into each instance.  No ``__init__`` boilerplate is needed —
+the decorator handles ``id`` assignment and trait injection automatically.
 """
 
 import csv
@@ -9,19 +11,65 @@ import json
 import os
 import random
 
-from pipeline_manager.pipeline import Pipeline, CachedSubprocess, Param
+from pipeline_manager.pipeline import (
+    Pipeline, CachedSubprocess, Param, Input, Output, Context
+)
+
+
+@Pipeline.register_node
+class CloneSolution(CachedSubprocess):
+    """Clone a solution JSON into N files, one per multiplier."""
+
+    inputs = [
+        Input("solution_json", description="Source solution JSON file"),
+    ]
+    outputs = [
+        Output("clones", description="Folder containing cloned JSON files"),
+    ]
+    params = [
+        Param("multiplier",
+              description="Number of clones to produce",
+              value=3,
+              param_type="int"),
+    ]
+
+    def _execute(self):
+        source = self.require_input("solution_json")
+
+        multiplier = 1
+        for p in self.params:
+            if p.name == "multiplier" and p.value is not None:
+                multiplier = int(p.value)
+
+        with open(source, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        out_dir = self.cache_folder()
+        os.makedirs(out_dir, exist_ok=True)
+
+        for i in range(1, multiplier + 1):
+            clone_path = os.path.join(out_dir, f"clone_{i:03d}.json")
+            cloned = json.loads(json.dumps(data))
+            cloned["clone_index"] = i
+            with open(clone_path, "w", encoding="utf-8") as f:
+                json.dump(cloned, f, ensure_ascii=False, indent=2)
+
+        print(f"  Cloned solution JSON x{multiplier} -> {out_dir}")
 
 
 @Pipeline.register_node
 class StudentGenerator(CachedSubprocess):
     """Generate random student data with name, gender, age, height, and weight."""
 
-    def __init__(self, ctx, id=None):
-        super().__init__(ctx, id)
-        self.params = [
-            Param(name="count", description="Number of students to generate",
-                  value=10, param_type="int"),
-        ]
+    outputs = [
+        Output("students", description="CSV of generated student records"),
+    ]
+    params = [
+        Param("count",
+              description="Number of students to generate",
+              value=10,
+              param_type="int"),
+    ]
 
     def _execute(self):
         count = 10
@@ -61,6 +109,13 @@ class StudentGenerator(CachedSubprocess):
 class AgeStats(CachedSubprocess):
     """Calculate age statistics (min, max, avg) from student data."""
 
+    inputs = [
+        Input("students", description="CSV of student records"),
+    ]
+    outputs = [
+        Output("age_stats", description="CSV with count/min/max/avg ages"),
+    ]
+
     def _execute(self):
         input_path = self.require_input("students")
 
@@ -88,6 +143,13 @@ class AgeStats(CachedSubprocess):
 @Pipeline.register_node
 class HeightWeightStats(CachedSubprocess):
     """Calculate height and weight statistics from student data."""
+
+    inputs = [
+        Input("students", description="CSV of student records"),
+    ]
+    outputs = [
+        Output("hw_stats", description="CSV with height/weight min/max/avg"),
+    ]
 
     def _execute(self):
         input_path = self.require_input("students")
@@ -122,6 +184,13 @@ class HeightWeightStats(CachedSubprocess):
 class GenderStats(CachedSubprocess):
     """Calculate gender distribution statistics from student data."""
 
+    inputs = [
+        Input("students", description="CSV of student records"),
+    ]
+    outputs = [
+        Output("gender_stats", description="CSV with male/female counts and ratio"),
+    ]
+
     def _execute(self):
         input_path = self.require_input("students")
 
@@ -152,6 +221,16 @@ class GenderStats(CachedSubprocess):
 @Pipeline.register_node
 class StudentReporter(CachedSubprocess):
     """Generate comprehensive report combining all statistics."""
+
+    inputs = [
+        Input("students", description="CSV of student records"),
+        Input("age_stats", description="CSV of age statistics"),
+        Input("hw_stats", description="CSV of height/weight statistics"),
+        Input("gender_stats", description="CSV of gender statistics"),
+    ]
+    outputs = [
+        Output("report", description="Combined JSON report"),
+    ]
 
     def _execute(self):
         students_path = self.require_input("students")
