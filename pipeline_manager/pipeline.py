@@ -142,7 +142,7 @@ class Pipeline:
     管道执行器类，负责管理和执行一系列 CachedSubprocess 阶段。
     
     Pipeline 是整个工作流的核心控制器，负责：
-    1. 加载工作目录配置（从 pipeline.json 或使用默认配置）
+    1. 加载工作目录配置（从 workspace.json 或使用默认配置）
     2. 管理执行上下文 (Context)
     3. 按顺序执行所有阶段
     4. 记录执行日志到文件和控制台
@@ -163,15 +163,15 @@ class Pipeline:
         
         Args:
             stages: CachedSubprocess 实例的可迭代对象，按执行顺序排列
-            working_folder: 工作目录路径，可包含 pipeline.json 文件（可选）
+            working_folder: 工作目录路径，可包含 workspace.json 文件（可选）
             force: 是否强制重新执行（默认 False，即使用缓存）
         """
         self.working_folder = working_folder
         self.force = force
         
-        # 尝试加载 pipeline.json 配置（可选）
+        # 尝试加载 workspace.json 配置（可选）
         cfg = {}
-        pipeline_path = os.path.join(working_folder, "pipeline.json")
+        pipeline_path = os.path.join(working_folder, "workspace.json")
         if os.path.isfile(pipeline_path):
             try:
                 with open(pipeline_path, "r", encoding="utf-8") as f:
@@ -179,7 +179,7 @@ class Pipeline:
                     # 提取 globals 配置，后续会单独处理
                     cfg.update(pipeline_data.get('globals', {}))
             except Exception as e:
-                print(f"[WARN] Failed to load pipeline.json: {e}")
+                print(f"[WARN] Failed to load workspace.json: {e}")
         
         # 设置工作目录的绝对路径
         cfg["working_folder"] = os.path.abspath(working_folder)
@@ -187,7 +187,7 @@ class Pipeline:
         # 创建上下文对象
         self.ctx = Context(**cfg)
         
-        # 如果 pipeline.json 包含 globals，已经通过构造参数注入到 Context dict 中
+        # 如果 workspace.json 包含 globals，已经通过构造参数注入到 Context dict 中
         
         # 将 stages 转换为列表，确保可多次迭代
         self.stages = list(stages)
@@ -388,13 +388,14 @@ class Pipeline:
 
     def clean(self):
         """
-        清理项目：删除工作目录下除 config.json 之外的所有内容
+        清理项目：删除工作目录下除 nodes.json 和 workspace.json 之外的所有内容
         """
         if not os.path.isdir(self.working_folder):
             print(f"[INFO] {self.working_folder} not found, skipped")
             return
+        keep = {"nodes.json", "workspace.json"}
         for entry in os.listdir(self.working_folder):
-            if entry == "config.json":
+            if entry in keep:
                 continue
             target = os.path.join(self.working_folder, entry)
             if os.path.isdir(target):
@@ -536,7 +537,7 @@ class Pipeline:
 
     @classmethod
     def load_from_json(cls, pipeline_path: str, working_folder: str) -> "Pipeline":
-        """Load pipeline stages from a pipeline.json file."""
+        """Load pipeline stages from a workspace.json file."""
         with open(pipeline_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 

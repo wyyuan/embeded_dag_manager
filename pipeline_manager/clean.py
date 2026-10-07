@@ -10,7 +10,7 @@ def main():
     """Main entry point for cleaning pipeline."""
     import argparse
     parser = argparse.ArgumentParser(description='Clean pipeline cache and logs')
-    parser.add_argument('--pipeline', '-p', required=True, help='Path to pipeline.json')
+    parser.add_argument('--pipeline', '-p', required=True, help='Path to workspace.json')
     args = parser.parse_args()
 
     working_folder = os.path.dirname(os.path.abspath(args.pipeline))
