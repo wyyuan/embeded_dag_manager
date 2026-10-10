@@ -41,7 +41,8 @@ class MyNode(CachedSubprocess):
     def _execute(self):
         input_path = self.require_input("input")
         # 处理...
-        with open(self.cache_path("output.csv"), "w") as f:
+        # 输出文件名与输出端口名保持一致（无扩展名）；扩展名由节点按数据类型自定
+        with open(self.cache_path("output"), "w") as f:
             # 写输出
             pass
 ```

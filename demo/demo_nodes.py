@@ -62,7 +62,7 @@ class StudentGenerator(CachedSubprocess):
     """Generate random student data with name, gender, age, height, and weight."""
 
     outputs = [
-        Output("students", description="CSV of generated student records"),
+        Output("students.csv", description="CSV of generated student records"),
     ]
     params = [
         Param("count",
@@ -110,14 +110,14 @@ class AgeStats(CachedSubprocess):
     """Calculate age statistics (min, max, avg) from student data."""
 
     inputs = [
-        Input("students", description="CSV of student records"),
+        Input("students.csv", description="CSV of student records"),
     ]
     outputs = [
-        Output("age_stats", description="CSV with count/min/max/avg ages"),
+        Output("age_stats.csv", description="CSV with count/min/max/avg ages"),
     ]
 
     def _execute(self):
-        input_path = self.require_input("students")
+        input_path = self.require_input("students.csv")
 
         ages = []
         with open(input_path, "r", encoding="utf-8") as f:
@@ -145,14 +145,14 @@ class HeightWeightStats(CachedSubprocess):
     """Calculate height and weight statistics from student data."""
 
     inputs = [
-        Input("students", description="CSV of student records"),
+        Input("students.csv", description="CSV of student records"),
     ]
     outputs = [
-        Output("hw_stats", description="CSV with height/weight min/max/avg"),
+        Output("hw_stats.csv", description="CSV with height/weight min/max/avg"),
     ]
 
     def _execute(self):
-        input_path = self.require_input("students")
+        input_path = self.require_input("students.csv")
 
         heights = []
         weights = []
@@ -185,14 +185,14 @@ class GenderStats(CachedSubprocess):
     """Calculate gender distribution statistics from student data."""
 
     inputs = [
-        Input("students", description="CSV of student records"),
+        Input("students.csv", description="CSV of student records"),
     ]
     outputs = [
-        Output("gender_stats", description="CSV with male/female counts and ratio"),
+        Output("gender_stats.csv", description="CSV with male/female counts and ratio"),
     ]
 
     def _execute(self):
-        input_path = self.require_input("students")
+        input_path = self.require_input("students.csv")
 
         male = 0
         female = 0
@@ -223,20 +223,20 @@ class StudentReporter(CachedSubprocess):
     """Generate comprehensive report combining all statistics."""
 
     inputs = [
-        Input("students", description="CSV of student records"),
-        Input("age_stats", description="CSV of age statistics"),
-        Input("hw_stats", description="CSV of height/weight statistics"),
-        Input("gender_stats", description="CSV of gender statistics"),
+        Input("students.csv", description="CSV of student records"),
+        Input("age_stats.csv", description="CSV of age statistics"),
+        Input("hw_stats.csv", description="CSV of height/weight statistics"),
+        Input("gender_stats.csv", description="CSV of gender statistics"),
     ]
     outputs = [
-        Output("report", description="Combined JSON report"),
+        Output("report.json", description="Combined JSON report"),
     ]
 
     def _execute(self):
-        students_path = self.require_input("students")
-        age_path = self.require_input("age_stats")
-        hw_path = self.require_input("hw_stats")
-        gender_path = self.require_input("gender_stats")
+        students_path = self.require_input("students.csv")
+        age_path = self.require_input("age_stats.csv")
+        hw_path = self.require_input("hw_stats.csv")
+        gender_path = self.require_input("gender_stats.csv")
 
         # Read students
         students = []

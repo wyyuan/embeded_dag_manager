@@ -7,7 +7,7 @@
             "description": "Generate random student data with name, gender, age, height, and weight",
             "inputs": [],
             "outputs": [
-                {"name": "students", "description": "Generated student list"}
+                {"name": "students.csv", "description": "Generated student list (CSV)"}
             ],
             "params": [
                 {"name": "count", "description": "Number of students to generate", "type": "int", "value": 10}
@@ -19,10 +19,10 @@
             "icon": "📅",
             "description": "Calculate age statistics (min, max, avg) from student data",
             "inputs": [
-                {"name": "students", "description": "Student list"}
+                {"name": "students.csv", "description": "Student list (CSV)"}
             ],
             "outputs": [
-                {"name": "age_stats", "description": "Age statistics"}
+                {"name": "age_stats.csv", "description": "Age statistics (CSV)"}
             ],
             "params": []
         },
@@ -32,10 +32,10 @@
             "icon": "📏",
             "description": "Calculate height and weight statistics from student data",
             "inputs": [
-                {"name": "students", "description": "Student list"}
+                {"name": "students.csv", "description": "Student list (CSV)"}
             ],
             "outputs": [
-                {"name": "hw_stats", "description": "Height and weight statistics"}
+                {"name": "hw_stats.csv", "description": "Height and weight statistics (CSV)"}
             ],
             "params": []
         },
@@ -45,10 +45,10 @@
             "icon": "⚧",
             "description": "Calculate gender distribution statistics from student data",
             "inputs": [
-                {"name": "students", "description": "Student list"}
+                {"name": "students.csv", "description": "Student list (CSV)"}
             ],
             "outputs": [
-                {"name": "gender_stats", "description": "Gender distribution statistics"}
+                {"name": "gender_stats.csv", "description": "Gender distribution statistics (CSV)"}
             ],
             "params": []
         },
@@ -58,13 +58,13 @@
             "icon": "📋",
             "description": "Generate comprehensive report combining all statistics",
             "inputs": [
-                {"name": "students", "description": "Student list"},
-                {"name": "age_stats", "description": "Age statistics"},
-                {"name": "hw_stats", "description": "Height/weight statistics"},
-                {"name": "gender_stats", "description": "Gender statistics"}
+                {"name": "students.csv", "description": "Student list (CSV)"},
+                {"name": "age_stats.csv", "description": "Age statistics (CSV)"},
+                {"name": "hw_stats.csv", "description": "Height/weight statistics (CSV)"},
+                {"name": "gender_stats.csv", "description": "Gender statistics (CSV)"}
             ],
             "outputs": [
-                {"name": "report", "description": "Final comprehensive report"}
+                {"name": "report.json", "description": "Final comprehensive report (JSON)"}
             ],
             "params": []
         }

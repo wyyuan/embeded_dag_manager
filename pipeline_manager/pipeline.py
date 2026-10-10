@@ -126,6 +126,23 @@ class CachedSubprocess(ABC):
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
 
+        # —— 记录输入/输出引用的实际文件名（含扩展名），防止引用错文件 ——
+        # 输入文件名 = 上游输出端口名（框架连接时按此解析），端口名可自带扩展名（如 xxx.csv）；
+        # 输出文件按 cache_path(port_name) 解析，真实扩展名以写入后的磁盘文件为准。
+        for p in self.inputs:
+            if p.path and not os.path.exists(p.path):
+                folder = os.path.dirname(p.path)
+                present = [f for f in os.listdir(folder)] if os.path.isdir(folder) else []
+                print(f"    [WARN] 输入 {p.name} 引用文件不存在: {p.path}"
+                      + (f"，缓存目录实际文件: {present}" if present else ""))
+        inputs_desc = "; ".join(
+            f"{p.name}={os.path.basename(p.path)}" if p.path else f"{p.name}=(未连接)"
+            for p in self.inputs)
+        outputs_desc = "; ".join(
+            f"{p.name}={os.path.basename(self.cache_path(p.name))}" for p in self.outputs)
+        print(f"    [PORTS] inputs : {inputs_desc or '(none)'}")
+        print(f"    [PORTS] outputs: {outputs_desc or '(none)'}")
+
         cached_outputs = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
         all_cached = not force and len(cached_outputs) > 0
         
@@ -135,6 +152,10 @@ class CachedSubprocess(ABC):
             print(f'[EXEC] {self.name} executing...')
             self._execute()
             print(f'[DONE] {self.name} finished')
+            # 执行完毕后记录缓存目录中实际生成的文件（含扩展名），供核对是否写错
+            actual = [f for f in os.listdir(cache_dir) if os.path.isfile(os.path.join(cache_dir, f))]
+            if actual:
+                print(f"    [FILES] 实际输出: {', '.join(actual)}")
 
 
 class Pipeline:
@@ -537,7 +558,30 @@ class Pipeline:
 
     @classmethod
     def load_from_json(cls, pipeline_path: str, working_folder: str) -> "Pipeline":
-        """Load pipeline stages from a workspace.json file."""
+        """从 workspace.json 加载并构建 Pipeline 实例。
+
+        工作流程：
+        1. 读取 JSON 中的 ``nodes`` / ``connections`` / ``globals`` 三个部分；
+        2. 将 ``globals`` 写入 Context 的共享缓存（``ctx.set_shared``），供所有节点读取；
+        3. 按 ``nodes`` 中的 ``type`` 从 ``NODE_REGISTRY`` 实例化每个 stage：
+           - 节点声明（类级 ``inputs`` / ``outputs`` / ``params``）为端口与参数的主体，
+             JSON 中的同名字段仅覆盖 description / value / param_type；
+           - JSON 中多出的端口会被追加到节点上（此前端自定义端口保留）；
+           - 未知节点类型打印 [WARN] 并跳过；
+        4. 根据 ``connections`` 建立输入端口路径：
+           下游输入路径 = 上游缓存目录中与**输出端口名同名**的文件
+           （``cache/{id}_{name}/{port}``，文件名即端口名，扩展名由节点按数据类型自定，
+           框架不强制拼任何扩展名）；未匹配到输入端口的连接被忽略；
+        5. 记录前端节点 ID 与 stage 实例的映射（``_node_frontend_id_map``）。
+
+        Args:
+            pipeline_path: workspace.json 的绝对/相对路径。
+            working_folder: 工作区根目录，缓存目录 ``cache/`` 与日志目录
+                ``logs/`` 均在此基础上创建。
+
+        Returns:
+            Pipeline: 按 JSON 配置组装好节点与连接的 Pipeline 实例。
+        """
         with open(pipeline_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
@@ -624,10 +668,13 @@ class Pipeline:
             from_instance = node_instances[from_node_id]
             to_instance = node_instances[to_node_id]
 
+            # 下游输入路径 = 上游输出文件的真实位置，文件名与输出端口名保持一致
+            # （节点通过 cache_path(port_name) 写出，文件扩展名由节点按数据类型自定，
+            #   可能是 pickle/json/csv —— 框架不得强制拼 .csv，否则非 CSV 端口必然错位）。
             output_path = os.path.join(
                 ctx.working_folder, 'cache',
                 f"{from_instance.id}_{from_instance.name}",
-                f"{from_port}.csv"
+                f"{from_port}"
             )
 
             input_port = to_instance.get_input(to_port)
