@@ -1,4 +1,4 @@
-"""Demo node implementations for the pipeline manager test workspace.
+"""Demo node implementations for the edaglite test workspace.
 
 All nodes use the declarative trait-injection style: ``inputs`` / ``outputs`` /
 ``params`` are declared as class-level attributes and ``@Pipeline.register_node``
@@ -11,64 +11,22 @@ import json
 import os
 import random
 
-from pipeline_manager.pipeline import (
-    Pipeline, CachedSubprocess, Param, Input, Output, Context
+from edaglite.pipeline import (
+    Pipeline, CachedSubprocess, Input, Output, Param, Context
 )
 
 
-@Pipeline.register_node
-class CloneSolution(CachedSubprocess):
-    """Clone a solution JSON into N files, one per multiplier."""
-
-    inputs = [
-        Input("solution_json", description="Source solution JSON file"),
-    ]
-    outputs = [
-        Output("clones", description="Folder containing cloned JSON files"),
-    ]
-    params = [
-        Param("multiplier",
-              description="Number of clones to produce",
-              value=3,
-              param_type="int"),
-    ]
-
-    def _execute(self):
-        source = self.require_input("solution_json")
-
-        multiplier = 1
-        for p in self.params:
-            if p.name == "multiplier" and p.value is not None:
-                multiplier = int(p.value)
-
-        with open(source, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        out_dir = self.cache_folder()
-        os.makedirs(out_dir, exist_ok=True)
-
-        for i in range(1, multiplier + 1):
-            clone_path = os.path.join(out_dir, f"clone_{i:03d}.json")
-            cloned = json.loads(json.dumps(data))
-            cloned["clone_index"] = i
-            with open(clone_path, "w", encoding="utf-8") as f:
-                json.dump(cloned, f, ensure_ascii=False, indent=2)
-
-        print(f"  Cloned solution JSON x{multiplier} -> {out_dir}")
-
-
-@Pipeline.register_node
+@Pipeline.register_node(icon="🎓")
 class StudentGenerator(CachedSubprocess):
     """Generate random student data with name, gender, age, height, and weight."""
 
     outputs = [
         Output("students.csv", description="CSV of generated student records"),
     ]
+    # 参数由节点定义：用户在网页面板只能填值，不能增删/改名/改类型
     params = [
-        Param("count",
-              description="Number of students to generate",
-              value=10,
-              param_type="int"),
+        Param("count", value=10, param_type="int",
+              description="生成学生的数量"),
     ]
 
     def _execute(self):
@@ -105,7 +63,7 @@ class StudentGenerator(CachedSubprocess):
         print(f"  Generated {count} students, saved to {output_path}")
 
 
-@Pipeline.register_node
+@Pipeline.register_node(icon="📅")
 class AgeStats(CachedSubprocess):
     """Calculate age statistics (min, max, avg) from student data."""
 
@@ -140,7 +98,7 @@ class AgeStats(CachedSubprocess):
         print(f"  Age stats: min={min_age}, max={max_age}, avg={avg_age}")
 
 
-@Pipeline.register_node
+@Pipeline.register_node(icon="📏")
 class HeightWeightStats(CachedSubprocess):
     """Calculate height and weight statistics from student data."""
 
@@ -180,7 +138,7 @@ class HeightWeightStats(CachedSubprocess):
         print(f"  Height avg: {h_avg}cm, Weight avg: {w_avg}kg")
 
 
-@Pipeline.register_node
+@Pipeline.register_node(icon="⚧")
 class GenderStats(CachedSubprocess):
     """Calculate gender distribution statistics from student data."""
 
@@ -218,7 +176,7 @@ class GenderStats(CachedSubprocess):
         print(f"  Male: {male}, Female: {female}")
 
 
-@Pipeline.register_node
+@Pipeline.register_node(icon="📋")
 class StudentReporter(CachedSubprocess):
     """Generate comprehensive report combining all statistics."""
 

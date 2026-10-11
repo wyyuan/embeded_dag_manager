@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pipeline_manager import Pipeline
+from edaglite import Pipeline
 
 # 注册所有 demo 节点到 Pipeline.NODE_REGISTRY
 import demo.demo_nodes  # noqa: F401

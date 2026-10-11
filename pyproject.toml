@@ -3,15 +3,15 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pipeline-manager"
-version = "0.3.2"
+name = "edaglite"
+version = "0.4.0"
 authors = [
   { name="Your Name", email="your.email@example.com" }
 ]
-description = "A cached pipeline execution framework with visual editor"
+description = "A lightweight, embeddable DAG workflow manager with caching and a visual editor"
 license = "MIT"
 requires-python = ">=3.8"
-keywords = ["pipeline", "workflow", "caching", "data-processing"]
+keywords = ["dag", "workflow", "pipeline", "embedded", "caching", "data-processing"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -33,11 +33,11 @@ dependencies = [
 ]
 
 [project.scripts]
-pipeline-run = "pipeline_manager.run:main"
-pipeline-viewer = "pipeline_manager.pipeline_viewer:main"
-pipeline-clean = "pipeline_manager.clean:main"
+edaglite-run = "edaglite.run:main"
+edaglite-viewer = "edaglite.pipeline_viewer:main"
+edaglite-clean = "edaglite.clean:main"
 
 [tool.setuptools]
-packages = ["pipeline_manager"]
-package-data = { "pipeline_manager" = ["web/*.html", "web/**/*.js"] }
+packages = ["edaglite"]
+package-data = { "edaglite" = ["web/*.html", "web/**/*.js"] }
 include-package-data = true

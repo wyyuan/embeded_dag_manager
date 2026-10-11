@@ -6,8 +6,8 @@
       "name": "StudentGenerator",
       "icon": "🎓",
       "description": "Generate random student data with name, gender, age, height, and weight",
-      "x": 365.7142857142857,
-      "y": -149.85714285714283,
+      "x": 245.71428571428572,
+      "y": 128.14285714285717,
       "inputs": [],
       "outputs": [
         {
@@ -15,7 +15,15 @@
           "description": "Generated student list (CSV)"
         }
       ],
-      "customParams": [],
+      "customParams": [
+        {
+          "name": "count",
+          "description": "生成学生的数量",
+          "type": "number",
+          "param_type": "int",
+          "value": 15
+        }
+      ],
       "locked": false
     },
     {
@@ -93,8 +101,8 @@
       "name": "StudentReporter",
       "icon": "📋",
       "description": "Generate comprehensive report combining all statistics",
-      "x": 833.2857142857143,
-      "y": -134.04761904761904,
+      "x": 959.2857142857143,
+      "y": 89.95238095238096,
       "inputs": [
         {
           "name": "students.csv",
@@ -209,5 +217,5 @@
       "enabled": true
     }
   ],
-  "savedAt": "2026-07-25T01:54:15.460Z"
+  "savedAt": "2026-10-11T04:17:18.465Z"
 }

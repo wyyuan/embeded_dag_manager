@@ -59,7 +59,9 @@ function showProperties() {
             customParamsHtml += renderCustomParam(param, i);
         }
 
-        const addParamBtn = '<button class="btn btn-secondary" style="width: 100%; font-size: 11px; padding: 6px;" onclick="showAddParamDialog()">+ Add Custom Parameter</button>';
+        if (!customParamsHtml) {
+            customParamsHtml = '<div style="font-size: 11px; color: var(--text-muted, #888); padding: 4px 2px;">该节点没有可配置参数</div>';
+        }
 
         panel.innerHTML = `
             <div class="config-section">
@@ -82,13 +84,12 @@ function showProperties() {
                 ${outputsHtml}
             </div>
             <div class="config-section">
-                <div class="config-title">Custom Parameters</div>
+                <div class="config-title">Parameters</div>
                 ${customParamsHtml}
-                ${addParamBtn}
             </div>
             <div class="config-section" style="display: flex; gap: 6px;">
                 <button class="btn btn-success" style="flex: 1;" onclick="runSingleNode(${selectedNode.id})">▶️ Run</button>
-                <button class="btn btn-secondary" style="flex: 1;" onclick="openNodeCache(${selectedNode.id}, '${selectedNode.name}')">📂 Cache</button>
+                <button class="btn btn-secondary" style="flex: 1;" onclick="openNodeCache(${selectedNode.id}, '${selectedNode.cacheName || selectedNode.type}')">📂 Cache</button>
                 <button class="btn btn-danger" style="flex: 1;" onclick="deleteNode(${selectedNode.id})">🗑️ Delete</button>
             </div>
         `;
@@ -98,17 +99,20 @@ function showProperties() {
     panel.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👆</div><div>Select a node or connection</div></div>';
 }
 
+// 参数由节点 Python 定义（register_node/类型注解），这里只允许用户填写值：
+// 参数名与类型只读展示，不提供新增、删除、改名、改类型的入口。
 function renderCustomParam(param, index) {
     let valueInput = '';
-    
+
     switch (param.type) {
-        case 'number':
-            valueInput = `<input type="number" class="form-input" value="${param.value || 0}" onchange="updateCustomParam(${index}, 'value', parseFloat(this.value))" step="any">`;
+        case 'number': {
+            const numValue = (param.value === undefined || param.value === null || param.value === '')
+                ? 0 : param.value;
+            valueInput = `<input type="number" class="form-input" value="${numValue}" onchange="updateCustomParam(${index}, 'value', parseFloat(this.value))" step="any">`;
             break;
-        case 'string':
-            valueInput = `<input type="text" class="form-input" value="${param.value || ''}" onchange="updateCustomParam(${index}, 'value', this.value)">`;
-            break;
-        case 'select':
+        }
+        case 'select': {
+            // 兼容旧 workspace 中保存的 select 参数：仅允许在既有选项间选值
             let options = '';
             if (param.options && Array.isArray(param.options)) {
                 for (let i = 0; i < param.options.length; i++) {
@@ -118,100 +122,31 @@ function renderCustomParam(param, index) {
             }
             valueInput = `<select class="form-input" onchange="updateCustomParam(${index}, 'value', this.value)">${options}</select>`;
             break;
+        }
+        default:
+            valueInput = `<input type="text" class="form-input" value="${param.value === undefined || param.value === null ? '' : param.value}" onchange="updateCustomParam(${index}, 'value', this.value)">`;
     }
-    
+
+    const descHtml = param.description
+        ? `<div style="font-size: 10px; color: var(--text-muted, #999); margin: 2px 0 4px;">${param.description}</div>`
+        : '';
+
     return `
-        <div class="form-group" style="border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; margin-bottom: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <input type="text" class="form-input" value="${param.name}" onchange="updateCustomParam(${index}, 'name', this.value)" style="width: calc(100% - 60px); font-weight: 600;" placeholder="Param name">
-                <button class="btn btn-danger" style="padding: 4px 8px; font-size: 10px;" onclick="removeCustomParam(${index})">×</button>
-            </div>
-            <div style="display: flex; gap: 6px; align-items: center;">
-                <select class="form-input" onchange="updateCustomParamType(${index}, this.value)" style="width: 80px;">
-                    <option value="string" ${param.type === 'string' ? 'selected' : ''}>String</option>
-                    <option value="number" ${param.type === 'number' ? 'selected' : ''}>Number</option>
-                    <option value="select" ${param.type === 'select' ? 'selected' : ''}>Select</option>
-                </select>
-                ${valueInput}
-            </div>
-            ${param.type === 'select' ? `
-                <div style="margin-top: 6px;">
-                    <input type="text" class="form-input" value="${(param.options || []).join(', ')}" onchange="updateCustomParamOptions(${index}, this.value)" placeholder="Options (comma separated)" style="font-size: 11px;">
-                </div>
-            ` : ''}
+        <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" style="font-weight: 600;">${param.name}</label>
+            ${descHtml}
+            ${valueInput}
         </div>
     `;
 }
 
-function showAddParamDialog() {
-    if (!selectedNode) return;
-    
-    if (!selectedNode.customParams) {
-        selectedNode.customParams = [];
-    }
-    
-    selectedNode.customParams.push({
-        name: 'param_' + (selectedNode.customParams.length + 1),
-        type: 'string',
-        value: '',
-        options: []
-    });
-    
-    showProperties();
-    autoSave();
-}
-
 function updateCustomParam(index, field, value) {
     if (!selectedNode || !selectedNode.customParams) return;
-    
+
+    // 仅允许更新值；名称与类型以节点定义为准
+    if (field !== 'value') return;
+
     selectedNode.customParams[index][field] = value;
-    autoSave();
-}
-
-function updateCustomParamType(index, newType) {
-    if (!selectedNode || !selectedNode.customParams) return;
-    
-    const param = selectedNode.customParams[index];
-    param.type = newType;
-    
-    switch (newType) {
-        case 'number':
-            param.value = 0;
-            delete param.options;
-            break;
-        case 'string':
-            param.value = '';
-            delete param.options;
-            break;
-        case 'select':
-            param.value = '';
-            param.options = ['option1', 'option2'];
-            break;
-    }
-    
-    showProperties();
-    autoSave();
-}
-
-function updateCustomParamOptions(index, optionsStr) {
-    if (!selectedNode || !selectedNode.customParams) return;
-    
-    const options = optionsStr.split(',').map(o => o.trim()).filter(o => o.length > 0);
-    selectedNode.customParams[index].options = options;
-    
-    if (options.length > 0 && !options.includes(selectedNode.customParams[index].value)) {
-        selectedNode.customParams[index].value = options[0];
-    }
-    
-    showProperties();
-    autoSave();
-}
-
-function removeCustomParam(index) {
-    if (!selectedNode || !selectedNode.customParams) return;
-    
-    selectedNode.customParams.splice(index, 1);
-    showProperties();
     autoSave();
 }
 
@@ -299,12 +234,10 @@ function loadFromStorage() {
                     const nodeType = nodeTypes.find(t => t.id === nodes[i].type);
                     nodes[i].locked = nodeType ? (nodeType.locked || false) : false;
                 }
-                if (!nodes[i].customParams) {
-                    nodes[i].customParams = [];
-                }
+                syncNodeCustomParams(nodes[i]);
                 renderNode(nodes[i]);
             }
-            
+
             if (nodes.length > 0) {
                 const minX = Math.min(...nodes.map(n => n.x));
                 const maxX = Math.max(...nodes.map(n => n.x + 170));

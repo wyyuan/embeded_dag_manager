@@ -95,7 +95,13 @@ def main():
     print(f"[INFO] 等待浏览器打开...")
 
     # 直接调用 run_viewer()，而非通过 subprocess
-    from pipeline_manager.pipeline_viewer import run_viewer
+    from edaglite.pipeline_viewer import run_viewer
+
+    # 启动前必须先 import 节点定义，触发 @Pipeline.register_node 注册，
+    # 否则画布中的节点类型会全部被判为"未注册"而无法运行
+    # （与 run_pipeline.py / run_demo.py 保持一致）
+    import demo.demo_nodes  # noqa: F401
+
     run_viewer(host='localhost', port=8080, open_browser=True, workspace=workspace_dir)
 
 

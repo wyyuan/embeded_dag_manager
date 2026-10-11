@@ -2,7 +2,7 @@
 """Command-line script to run pipeline from workspace.json."""
 
 import os
-from pipeline_manager import Pipeline
+from edaglite import Pipeline
 
 
 def main():

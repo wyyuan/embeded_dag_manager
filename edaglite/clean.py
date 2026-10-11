@@ -3,7 +3,7 @@
 
 import sys
 import os
-from pipeline_manager import Pipeline
+from edaglite import Pipeline
 
 
 def main():

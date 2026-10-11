@@ -6,9 +6,13 @@ import datetime
 import sys
 import inspect
 import copy
+import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Callable, Any, List, Optional, Literal
+from typing import (
+    Dict, Callable, Any, List, Optional, Literal,
+    Union, get_type_hints, get_origin, get_args,
+)
 from collections import defaultdict, deque
 
 
@@ -35,7 +39,12 @@ class Param:
 
 
 class Context(dict):
-    """Cross-stage file resolver + source files container"""
+    """执行上下文：跨节点共享的键值存储 + 工作目录定位。
+
+    Context 本身就是一个 dict：workspace.json 的 ``globals`` 与
+    ``working_folder`` 都以普通键值存入，节点通过 ``self.ctx[key]`` /
+    ``self.ctx.get(key)`` 直接读取，框架不再维护任何独立的全局共享缓存。
+    """
 
     _id_counter = 0
 
@@ -44,24 +53,11 @@ class Context(dict):
         self.working_folder = working_folder
         self['working_folder'] = working_folder
         os.makedirs(working_folder, exist_ok=True)
-        self._shared_cache = {}
 
     @classmethod
     def generate_id(cls) -> int:
         cls._id_counter += 1
         return cls._id_counter
-
-    def shared_cache_path(self, name: str) -> str:
-        return os.path.join(self.working_folder, 'cache', name)
-
-    def shared_cache_folder(self) -> str:
-        return os.path.join(self.working_folder, 'cache')
-
-    def set_shared(self, key: str, value):
-        self._shared_cache[key] = value
-
-    def get_shared(self, key: str, default=None):
-        return self._shared_cache.get(key, default)
 
 
 class CachedSubprocess(ABC):
@@ -111,14 +107,6 @@ class CachedSubprocess(ABC):
         if not port or not port.path:
             raise ValueError(f"Input '{port_name}' not connected (port path not set)")
         return port.path
-
-    def get_shared(self, key: str, default=None):
-        """Get shared global value from context."""
-        return self.ctx.get_shared(key, default)
-    
-    def set_shared(self, key: str, value):
-        """Set shared global value to context."""
-        self.ctx.set_shared(key, value)
 
     def run(self, force: bool = False):
         """Execute the stage with caching support."""
@@ -197,7 +185,7 @@ class Pipeline:
             try:
                 with open(pipeline_path, "r", encoding="utf-8") as f:
                     pipeline_data = json.load(f)
-                    # 提取 globals 配置，后续会单独处理
+                    # globals 作为普通键值并入 cfg，随后随 Context(**cfg) 落入 Context dict
                     cfg.update(pipeline_data.get('globals', {}))
             except Exception as e:
                 print(f"[WARN] Failed to load workspace.json: {e}")
@@ -205,16 +193,22 @@ class Pipeline:
         # 设置工作目录的绝对路径
         cfg["working_folder"] = os.path.abspath(working_folder)
         
-        # 创建上下文对象
+        # 创建上下文对象（Context 是 dict，globals 可由节点通过 ctx.get(key) 读取）
         self.ctx = Context(**cfg)
-        
-        # 如果 workspace.json 包含 globals，已经通过构造参数注入到 Context dict 中
         
         # 将 stages 转换为列表，确保可多次迭代
         self.stages = list(stages)
 
         # 前端节点ID到 stage 实例的映射（用于运行单个节点）
         self._node_frontend_id_map: Dict[str, 'CachedSubprocess'] = {}
+
+        # 原始连接表（load_from_json 填充），供执行前图校验与拓扑排序使用
+        self.edges: List[dict] = []
+
+        # 未注册节点类型：前端节点ID -> 节点类型名（load_from_json 填充）。
+        # 这些节点因类型不在 NODE_REGISTRY 中而无法实例化，图校验与单节点
+        # 执行据此给出"类型未注册"的准确报错，而非笼统的"节点不存在"。
+        self.unregistered_nodes: Dict[Any, str] = {}
 
         # 创建日志目录
         self.log_dir = os.path.join(working_folder, "logs")
@@ -235,9 +229,11 @@ class Pipeline:
         1. 创建 Tee 对象，将输出同时写入控制台和日志文件
         2. 重定向 stdout 到 Tee 对象
         3. 输出执行信息（开始时间、工作目录、强制模式、阶段列表）
-        4. 按顺序执行每个阶段
-        5. 输出完成信息
-        6. 恢复原始 stdout
+        4. 执行前校验连接图（悬空连接 / 重复或冲突边 / 环形依赖），并按拓扑序排列节点；
+           声明顺序合法时执行序与声明序一致，乱序时自动重排
+        5. 按拓扑序执行每个阶段
+        6. 输出完成信息
+        7. 恢复原始 stdout
         
         日志文件会保存在 working_folder/logs/pipeline_YYYYMMDD_HHMMSS.log
         """
@@ -271,15 +267,20 @@ class Pipeline:
                 print(f"[INFO] Log file: {self.log_file}")
                 print("=" * 80)
 
+                # 执行前图校验（悬空连接 / 重复边 / 环形依赖）并得到拓扑序
+                ordered_stages = self._validate_graph_and_order()
+                if ordered_stages != self.stages:
+                    print("[INFO] 节点声明顺序不是拓扑序，已按依赖关系自动重排执行")
+
                 # 输出阶段列表
                 print("[INFO] Stages to execute:")
-                for i, stage in enumerate(self.stages, 1):
+                for i, stage in enumerate(ordered_stages, 1):
                     print(f"  {i}. {stage.name}")
                 print("=" * 80)
 
-                # 按顺序执行所有阶段
+                # 按拓扑序执行所有阶段
                 print("[INFO] Executing stages:")
-                for i, stage in enumerate(self.stages, 1):
+                for i, stage in enumerate(ordered_stages, 1):
                     print(f"\n--- Stage {i}: {stage.name} ---")
                     stage.run(force=self.force)
 
@@ -363,7 +364,11 @@ class Pipeline:
         """
         stage = self._node_frontend_id_map.get(node_id)
         if stage is None:
-            available_ids = ", ".join(self._node_frontend_id_map.keys())
+            if node_id in self.unregistered_nodes:
+                raise ValueError(
+                    f"Node '{node_id}' 的类型 '{self.unregistered_nodes[node_id]}' "
+                    f"未注册，无法单独执行；请确认启动前已 import 该节点的 Python 定义")
+            available_ids = ", ".join(map(str, self._node_frontend_id_map.keys()))
             raise ValueError(f"Node '{node_id}' not found. Available IDs: {available_ids}")
 
         # 打开日志文件并设置输出重定向
@@ -403,43 +408,198 @@ class Pipeline:
                 print(f"[INFO] Node '{stage.name}' finished")
                 print(f"[INFO] Pipeline completed at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             finally:
-                # 确保恢复原始 stdout
+                # 确保恢复 stdout
                 sys.stdout = self.original_stdout
                 print(f"[INFO] Log saved to: {self.log_file}")
 
+    def _validate_graph_and_order(self) -> List["CachedSubprocess"]:
+        """执行前校验连接图并返回按拓扑序排列的节点。
+
+        校验三类非法图（任一失败即抛 ValueError 中止执行，不再静默忽略）：
+
+        1. **悬空连接**：边引用的节点不存在，或引用的输出/输入端口在节点上
+           不存在（例如节点类型已改但画布还留着旧连线）；
+        2. **重复/冲突边**：完全相同的连接出现多次；或同一个输入端口被两个
+           不同的上游输出连接（此前后者会被最后一条边静默覆盖）；
+        3. **环形依赖**：图中存在环，无法确定执行顺序，报错并列出环上节点。
+
+        Returns:
+            按拓扑序（上游在前）排列的 stage 列表。采用稳定策略——每轮选取
+            声明顺序最靠前的"就绪"节点，因此当 nodes 声明顺序本身就是合法
+            拓扑序时（如 demo），执行顺序与以前完全一致；仅在声明乱序时才
+            自动重排。直接用代码构造、未经 load_from_json 装配的 Pipeline
+            没有边表，原样返回 ``self.stages``。
+
+        Raises:
+            ValueError: 图校验失败时抛出，消息指明具体的非法连接或环上节点。
+        """
+        # 直接代码构造的 Pipeline 没有前端 ID 映射与边表，保持线性执行
+        if not self._node_frontend_id_map:
+            return list(self.stages)
+
+        fid_map = self._node_frontend_id_map
+
+        # 图中存在类型未注册的节点（即使没有连线）时无法完整执行，显式报错
+        if self.unregistered_nodes:
+            detail = ", ".join(
+                f"ID={fid}({ntype})" for fid, ntype in self.unregistered_nodes.items())
+            raise ValueError(
+                f"存在未注册的节点类型，无法执行：{detail}；"
+                f"请确认启动前已 import 这些节点的 Python 定义（@Pipeline.register_node）")
+
+        decl_order = list(fid_map.keys())  # fid_map 按 nodes 数组顺序插入
+
+        adjacency: Dict[Any, List[Any]] = {fid: [] for fid in decl_order}
+        indegree: Dict[Any, int] = {fid: 0 for fid in decl_order}
+        seen_edges = set()
+        input_sources: Dict[tuple, tuple] = {}
+
+        for conn in self.edges:
+            from_fid = conn.get('from', {}).get('node')
+            from_port = conn.get('from', {}).get('port')
+            to_fid = conn.get('to', {}).get('node')
+            to_port = conn.get('to', {}).get('port')
+
+            # —— 1a. 悬空：引用的节点不存在（区分"类型未注册"与"ID 不存在"） ——
+            if from_fid not in fid_map:
+                if from_fid in self.unregistered_nodes:
+                    raise ValueError(
+                        f"节点（ID={from_fid}）的类型 "
+                        f"'{self.unregistered_nodes[from_fid]}' 未注册，无法执行；"
+                        f"请确认启动前已 import 该节点的 Python 定义"
+                        f"（连线：{from_fid}.{from_port} -> {to_fid}.{to_port}）")
+                raise ValueError(
+                    f"非法连接：起点节点 '{from_fid}' 不存在"
+                    f"（{from_fid}.{from_port} -> {to_fid}.{to_port}），请删除画布上的悬空连线")
+            if to_fid not in fid_map:
+                if to_fid in self.unregistered_nodes:
+                    raise ValueError(
+                        f"节点（ID={to_fid}）的类型 "
+                        f"'{self.unregistered_nodes[to_fid]}' 未注册，无法执行；"
+                        f"请确认启动前已 import 该节点的 Python 定义"
+                        f"（连线：{from_fid}.{from_port} -> {to_fid}.{to_port}）")
+                raise ValueError(
+                    f"非法连接：终点节点 '{to_fid}' 不存在"
+                    f"（{from_fid}.{from_port} -> {to_fid}.{to_port}），请删除画布上的悬空连线")
+
+            from_inst = fid_map[from_fid]
+            to_inst = fid_map[to_fid]
+
+            # —— 1b. 悬空：引用的端口不存在 ——
+            if from_inst.get_output(from_port) is None:
+                raise ValueError(
+                    f"非法连接：节点 '{from_inst.name}' 上不存在输出端口 '{from_port}'"
+                    f"（-> {to_inst.name}.{to_port}）")
+            if to_inst.get_input(to_port) is None:
+                raise ValueError(
+                    f"非法连接：节点 '{to_inst.name}' 上不存在输入端口 '{to_port}'"
+                    f"（{from_inst.name}.{from_port} ->）")
+
+            # —— 2a. 完全重复的边 ——
+            edge_key = (from_fid, from_port, to_fid, to_port)
+            if edge_key in seen_edges:
+                raise ValueError(
+                    f"重复连接：{from_inst.name}.{from_port} -> "
+                    f"{to_inst.name}.{to_port} 出现了多次，请只保留一条")
+            seen_edges.add(edge_key)
+
+            # —— 2b. 同一输入端口被多个上游连接（多生产者冲突） ——
+            port_key = (to_fid, to_port)
+            prev = input_sources.get(port_key)
+            if prev is not None:
+                prev_fid, prev_port = prev
+                raise ValueError(
+                    f"输入端口冲突：'{to_inst.name}.{to_port}' 同时连接了 "
+                    f"'{fid_map[prev_fid].name}.{prev_port}' 与 "
+                    f"'{from_inst.name}.{from_port}'，一个输入端口只能有一个上游")
+            input_sources[port_key] = (from_fid, from_port)
+
+            adjacency[from_fid].append(to_fid)
+            indegree[to_fid] += 1
+
+        # —— 3. Kahn 拓扑排序；稳定策略：每轮取声明顺序最靠前的零入度节点 ——
+        # 节点规模通常只有几十个，O(N²) 的全表扫描换取"合法声明序 == 执行序"
+        # 的稳定语义，避免无谓重排。
+        remaining = set(decl_order)
+        work_indegree = dict(indegree)
+        ordered: List[Any] = []
+        while remaining:
+            picked = next(
+                (fid for fid in decl_order if fid in remaining and work_indegree[fid] == 0),
+                None
+            )
+            if picked is None:
+                cycle_names = ", ".join(
+                    fid_map[fid].name for fid in decl_order if fid in remaining)
+                raise ValueError(
+                    f"检测到环形依赖，无法确定执行顺序。成环节点（或其下游）：{cycle_names}")
+            remaining.discard(picked)
+            ordered.append(picked)
+            for nxt in adjacency[picked]:
+                work_indegree[nxt] -= 1
+
+        return [fid_map[fid] for fid in ordered]
+
     def clean(self):
         """
-        清理项目：删除工作目录下除 nodes.json 和 workspace.json 之外的所有内容
+        清理工作目录下的缓存与日志（白名单方式：只删 ``cache/`` 和 ``logs/``）。
+
+        仅删除框架自身产生的两个目录，工作区中的节点脚本、workspace.json、
+        nodes.json 及其他任何用户文件都不会被触碰——避免黑名单式删除在
+        working_folder 传错时误删用户数据。
         """
         if not os.path.isdir(self.working_folder):
             print(f"[INFO] {self.working_folder} not found, skipped")
             return
-        keep = {"nodes.json", "workspace.json"}
-        for entry in os.listdir(self.working_folder):
-            if entry in keep:
+        # 白名单：只有框架自己产出的目录才允许删除
+        targets = ["cache", "logs"]
+        for name in targets:
+            target = os.path.join(self.working_folder, name)
+            if not os.path.exists(target):
                 continue
-            target = os.path.join(self.working_folder, entry)
             if os.path.isdir(target):
                 shutil.rmtree(target)
             else:
                 os.remove(target)
             print(f"[INFO] Removed {target}")
 
-    # 节点类型注册表：节点类名 -> 类对象
+    # 节点类型注册表：节点类型 id -> 类对象
+    # id 默认为类名，可通过 @Pipeline.register_node(node_id=...) 自定义
     NODE_REGISTRY: Dict[str, type] = {}
 
     @staticmethod
-    def register_node(cls):
-        """Decorator to register a CachedSubprocess subclass with trait injection.
+    def register_node(cls=None, *, node_id=None, name=None, icon=None,
+                      group=None, description=None):
+        """Register a CachedSubprocess subclass, with optional UI metadata.
 
-        Supports two convenience features:
+        Can be used bare (``@Pipeline.register_node``) or parameterised
+        (``@Pipeline.register_node(icon="🎓", name="展示名")``). The optional
+        metadata is consumed by the visual editor's node palette only — it
+        never affects execution or cache paths:
+
+        - ``node_id``: registry key / 节点类型 id，面板与 workspace.json 用它
+          定位类型；默认取类名。自定义后旧 workspace.json 中的旧类型名会被
+          视为未注册。
+        - ``name``: 面板展示名，默认同 node_id。
+        - ``icon`` / ``group`` / ``description``: 面板图标、分组与描述；
+          description 缺省时面板回退到类 docstring 首行。
+
+        Besides metadata, three convenience features are supported:
 
         1. Class-level declarative traits:
            Declare ``inputs`` / ``outputs`` / ``params`` as class attributes and
            they will be deep-copied into each instance automatically, so you do
            not need to assign them inside ``__init__``.
 
-        2. Simplified ``__init__`` signature:
+        2. Type-hint parameters:
+           Annotated scalar class attributes become params automatically —
+           ``count: int = 10`` is equivalent to
+           ``params = [Param("count", value=10, param_type="int")]``.
+           Supported annotations are ``int`` / ``float`` / ``str`` and a single
+           scalar wrapped in ``Optional[...]``; other annotations are ignored.
+           Explicit ``params`` take precedence over same-named hints.
+
+        3. Simplified ``__init__`` signature:
            You may write ``def __init__(self, ctx):`` without the ``id``
            parameter.  The decorator normalises the signature so the class is
            still constructible as ``Cls(ctx, id=...)`` / ``Cls(ctx)``.
@@ -450,23 +610,53 @@ class Pipeline:
             class CloneSolution(CachedSubprocess):
                 inputs = [Input("solution_json")]
                 outputs = [Output("clones")]
-                params = [Param("multiplier", value=1, param_type="int")]
+                multiplier: int = 1
 
                 def __init__(self, ctx):
                     super().__init__(ctx)
         """
-        if not issubclass(cls, CachedSubprocess):
-            raise TypeError(
-                f"@Pipeline.register_node can only decorate CachedSubprocess "
-                f"subclasses, got {cls.__name__}"
-            )
+        def decorator(cls):
+            if not isinstance(cls, type) or not issubclass(cls, CachedSubprocess):
+                raise TypeError(
+                    f"@Pipeline.register_node can only decorate CachedSubprocess "
+                    f"subclasses, got {cls!r}"
+                )
 
+            type_id = str(node_id) if node_id is not None else cls.__name__
+            existing = Pipeline.NODE_REGISTRY.get(type_id)
+            if existing is not None and existing is not cls:
+                raise ValueError(
+                    f"Duplicate node type id '{type_id}': already registered to "
+                    f"{existing.__name__}, cannot re-register {cls.__name__}"
+                )
+            # 纯面板元数据（不参与执行）；viewer 反射时读取
+            cls._node_meta = {
+                "id": type_id,
+                "name": str(name) if name else type_id,
+                "icon": icon or "",
+                "group": group or "",
+                "description": description or "",
+            }
+            return Pipeline._register_node_traits(cls, type_id)
+
+        # 裸装饰器用法 @Pipeline.register_node：第一个位置参数就是类
+        if cls is not None:
+            return decorator(cls)
+        # 工厂用法 @Pipeline.register_node(icon=...)：返回真正的装饰器
+        return decorator
+
+    @staticmethod
+    def _register_node_traits(cls, type_id):
+        """Apply trait-injection/__init__ normalisation and put cls into registry."""
         # ---- Collect class-level declarative traits -------------------------
         # Use vars(cls) instead of getattr so we only pick *direct* class
         # attributes and don't accidentally pull them from CachedSubprocess.
         declared_inputs = vars(cls).get("inputs", None)
         declared_outputs = vars(cls).get("outputs", None)
         declared_params = vars(cls).get("params", None)
+        # 类级标量类型注解推导参数（int/float/str，含 Optional 包装）
+        hint_params = Pipeline._params_from_type_hints(
+            cls, declared_inputs, declared_outputs, declared_params)
 
         # ---- Inspect original __init__ signature ----------------------------
         original_init = cls.__init__
@@ -531,6 +721,12 @@ class Pipeline:
                 self.outputs = [copy.deepcopy(p) for p in declared_outputs]
             if declared_params is not None:
                 self.params = [copy.deepcopy(p) for p in declared_params]
+            # 注解参数排在显式声明之后；同名（含 __init__ 动态添加）不覆盖
+            if hint_params:
+                existing_param_names = {p.name for p in self.params}
+                for p in hint_params:
+                    if p.name not in existing_param_names:
+                        self.params.append(copy.deepcopy(p))
 
         # Preserve metadata so introspection / debugging stays friendly.
         _wrapped_init.__name__ = original_init.__name__
@@ -553,8 +749,82 @@ class Pipeline:
         cls.__init__ = _wrapped_init
 
         # ---- Register and return -------------------------------------------
-        Pipeline.NODE_REGISTRY[cls.__name__] = cls
+        Pipeline.NODE_REGISTRY[type_id] = cls
         return cls
+
+    # 标量类型注解 -> Param.param_type 白名单（bool 不支持：前端无对应控件）
+    _HINT_PARAM_TYPES = {int: "int", float: "float", str: "string"}
+    # 即使写了标量注解也不能当作参数的保留属性名
+    _RESERVED_HINT_NAMES = frozenset({
+        "id", "ctx", "name", "description", "inputs", "outputs", "params",
+    })
+    # Python 3.10+ 的 X | None 语法产生的 UnionType
+    _UNION_TYPES = (Union, getattr(types, "UnionType", Union))
+
+    @staticmethod
+    def _resolve_hint_param_type(ann):
+        """把单个类型注解映射为 ``Param.param_type``；不支持时返回 None。
+
+        支持 ``int`` / ``float`` / ``str`` 以及仅包一个标量的
+        ``Optional[X]`` / ``X | None``；``bool`` / 容器 / 多类型联合返回 None。
+        """
+        if isinstance(ann, str):
+            # from __future__ import annotations 且 get_type_hints 解析失败时的兜底
+            ann = {"int": int, "float": float, "str": str, "string": str}.get(
+                ann.strip())
+            if ann is None:
+                return None
+        if get_origin(ann) in Pipeline._UNION_TYPES:
+            args = [a for a in get_args(ann) if a is not type(None)]
+            if len(args) == 1:
+                return Pipeline._resolve_hint_param_type(args[0])
+            return None
+        return Pipeline._HINT_PARAM_TYPES.get(ann)
+
+    @staticmethod
+    def _params_from_type_hints(cls, declared_inputs, declared_outputs,
+                                declared_params):
+        """从类级标量类型注解推导 Param 列表，顺序与注解声明顺序一致。
+
+        ``count: int = 10`` 等价于
+        ``params = [Param("count", value=10, param_type="int")]``；只有注解
+        没有默认值时 value 为 None。显式 ``params``、同名输入/输出端口以及
+        保留属性名优先，命中即跳过；不支持的注解静默忽略，非标量默认值告警跳过。
+        """
+        try:
+            hints = get_type_hints(cls)
+        except Exception as e:
+            try:
+                # 3.13 及更早：__annotations__ 是普通 dict；3.14 PEP 649 下
+                # 若延迟求值仍可解析，这里同样能拿到 dict
+                hints = dict(cls.__annotations__)
+            except Exception:
+                # 存在无法解析的注解名（如未导入的 Optional）——单个坏注解
+                # 不应阻断节点注册，告警后跳过全部注解参数
+                print(f"[WARN] 节点 {cls.__name__} 的类型注解无法解析"
+                      f"（{type(e).__name__}: {e}），已跳过注解参数")
+                return []
+
+        taken = {p.name for p in (declared_params or [])}
+        taken.update(p.name for p in (declared_inputs or []))
+        taken.update(p.name for p in (declared_outputs or []))
+
+        class_vars = vars(cls)
+        result = []
+        for attr, ann in hints.items():
+            if (attr.startswith("_") or attr in Pipeline._RESERVED_HINT_NAMES
+                    or attr in taken):
+                continue
+            ptype = Pipeline._resolve_hint_param_type(ann)
+            if ptype is None:
+                continue
+            default = class_vars[attr] if attr in class_vars else None
+            if default is not None and not isinstance(default, (int, float, str, bool)):
+                print(f"[WARN] 节点 {cls.__name__} 的注解参数 '{attr}' 默认值不是标量"
+                      f"（{type(default).__name__}），已跳过")
+                continue
+            result.append(Param(name=attr, value=default, param_type=ptype))
+        return result
 
     @classmethod
     def load_from_json(cls, pipeline_path: str, working_folder: str) -> "Pipeline":
@@ -562,17 +832,22 @@ class Pipeline:
 
         工作流程：
         1. 读取 JSON 中的 ``nodes`` / ``connections`` / ``globals`` 三个部分；
-        2. 将 ``globals`` 写入 Context 的共享缓存（``ctx.set_shared``），供所有节点读取；
+        2. 将 ``globals`` 以普通键值写入 Context（Context 本身是 dict，节点通过
+           ``self.ctx[key]`` / ``self.ctx.get(key)`` 读取，框架不维护全局共享缓存）；
         3. 按 ``nodes`` 中的 ``type`` 从 ``NODE_REGISTRY`` 实例化每个 stage：
            - 节点声明（类级 ``inputs`` / ``outputs`` / ``params``）为端口与参数的主体，
-             JSON 中的同名字段仅覆盖 description / value / param_type；
-           - JSON 中多出的端口会被追加到节点上（此前端自定义端口保留）；
+             其中参数的名称/类型/描述完全由节点定义，JSON 只能为同名参数提供 value；
+           - JSON 中多出的输入/输出端口会被追加到节点上（此前端自定义端口保留），
+             多出的参数则打印 [WARN] 并忽略；
            - 未知节点类型打印 [WARN] 并跳过；
         4. 根据 ``connections`` 建立输入端口路径：
            下游输入路径 = 上游缓存目录中与**输出端口名同名**的文件
            （``cache/{id}_{name}/{port}``，文件名即端口名，扩展名由节点按数据类型自定，
-           框架不强制拼任何扩展名）；未匹配到输入端口的连接被忽略；
-        5. 记录前端节点 ID 与 stage 实例的映射（``_node_frontend_id_map``）。
+           框架不强制拼任何扩展名）。加载阶段对节点/端口不匹配的连线保持宽容
+           （编辑器可能保存半成品图），但原始连接表会被完整保留；
+        5. 记录前端节点 ID 与 stage 实例的映射（``_node_frontend_id_map``）与原始
+           连接表（``edges``）——执行前由 ``_validate_graph_and_order`` 对悬空连接、
+           重复/冲突边、环形依赖统一报错并做拓扑排序。
 
         Args:
             pipeline_path: workspace.json 的绝对/相对路径。
@@ -591,16 +866,19 @@ class Pipeline:
 
         ctx = Context(working_folder)
         
-        # 将全局配置写入 Context 的共享缓存
+        # 将全局配置以普通键值写入 Context（Context 是 dict，
+        # 节点通过 self.ctx[key] / self.ctx.get(key) 读取，无独立共享缓存）
         for key, value in globals_dict.items():
-            ctx.set_shared(key, value)
+            ctx[key] = value
 
         node_instances = {}
+        unregistered: Dict[Any, str] = {}
 
         for i, node_def in enumerate(nodes, 1):
             node_type = node_def.get('type')
             if node_type not in cls.NODE_REGISTRY:
                 print(f"[WARN] Unknown node type: {node_type}, skipping")
+                unregistered[node_def.get('id')] = node_type
                 continue
 
             node_cls = cls.NODE_REGISTRY[node_type]
@@ -635,24 +913,18 @@ class Pipeline:
                         description=outp.get('description', '')
                     ))
 
-            # --- Update existing declarative params (append new if missing) ---
+            # --- Params: 以节点定义为准，workspace.json 只提供用户填写的值 ---
+            # 参数名/类型/描述来自注册类（显式 params 或类型注解）；JSON 中
+            # 多出的参数（如旧版手工添加的）忽略并告警，不再动态追加。
             for param in node_def.get('customParams', []):
                 name = param.get('name', '')
                 existing = next((p for p in instance.params if p.name == name), None)
                 if existing:
                     if 'value' in param and param['value'] is not None:
                         existing.value = param['value']
-                    if 'description' in param:
-                        existing.description = param['description']
-                    if 'param_type' in param:
-                        existing.param_type = param['param_type']
-                else:
-                    instance.params.append(Param(
-                        name=name,
-                        description=param.get('description', ''),
-                        value=param.get('value'),
-                        param_type=param.get('param_type', 'string')
-                    ))
+                elif name:
+                    print(f"[WARN] 节点 {node_type} 未定义参数 '{name}'，已忽略 "
+                          f"（参数以节点 Python 定义为准，workspace.json 只能赋值）")
 
             node_instances[node_def['id']] = instance
 
@@ -685,4 +957,8 @@ class Pipeline:
         pipeline = cls(stages, working_folder)
         # 保存前端节点ID到 stage 实例的映射
         pipeline._node_frontend_id_map = {nid: inst for nid, inst in node_instances.items()}
+        # 记录类型未注册、未能实例化的节点，供执行前校验给出准确报错
+        pipeline.unregistered_nodes = unregistered
+        # 保存原始连接表，供执行前的悬空/重复边/环校验与拓扑排序使用
+        pipeline.edges = connections
         return pipeline

@@ -24,81 +24,114 @@ let resizeTarget = null;
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
+function showEmptyNodeTypes(reason) {
+    // 节点面板唯一直相是后端 NODE_REGISTRY；拿不到类型时给出可操作提示，
+    // 不再用后端并不存在的假节点类型填充面板。
+    const container = document.getElementById('node-types-container');
+    nodeTypes = [];
+    if (container) {
+        container.innerHTML =
+            `<div style="padding:12px 10px;font-size:12px;line-height:18px;color:var(--text-muted,#888);">`
+            + `⚠️ ${reason}`
+            + `</div>`;
+    }
+}
+
+function applyNodeTypes(data) {
+    if (!data || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+        showEmptyNodeTypes('没有已注册的节点类型。请确认启动 viewer 前已 import 节点定义（@Pipeline.register_node）。');
+        return;
+    }
+    nodeTypes = data.nodes;
+    renderNodeTypes();
+}
+
+// 将后端参数类型（int/float/string）转换为属性面板使用的 UI 类型（number/string）
+function paramUiType(type) {
+    return (type === 'int' || type === 'float' || type === 'number') ? 'number' : 'string';
+}
+
+// 将属性面板 UI 类型转换回后端 param_type（int/float/string）；
+// number 保留已有的 int/float 精度，select 与 string 统一落为 string
+function paramBackendType(uiType, current) {
+    if (uiType === 'number') {
+        return (current === 'int' || current === 'float') ? current : 'float';
+    }
+    return 'string';
+}
+
+// 归一化节点参数：旧数据可能只有 type 或只有 param_type，这里双向补齐，
+// 保证保存到 workspace.json 的每个参数后端都能读到类型
+function normalizeNodeCustomParams(node) {
+    if (!Array.isArray(node.customParams)) {
+        node.customParams = [];
+        return;
+    }
+    for (const p of node.customParams) {
+        if (!p.type) p.type = paramUiType(p.param_type);
+        if (!p.param_type) p.param_type = paramBackendType(p.type, undefined);
+    }
+}
+
+// 以注册节点类型（nodeTypes）的参数定义为唯一真相源，合并工作区中节点的参数：
+// - 类型定义新增的参数：按模板播种（带默认值），旧 workspace 打开即可见；
+// - 同名参数：名称/类型/描述以定义为准刷新，仅保留用户已填的 value；
+// - 类型定义中已删除的残留参数：剔除（与后端忽略未知参数的契约一致）。
+// 找不到节点类型时退化为旧数据双向归一化。
+function syncNodeCustomParams(node) {
+    normalizeNodeCustomParams(node);
+    const nodeType = nodeTypes.find(t => t.id === node.type);
+    if (!nodeType || !Array.isArray(nodeType.params)) return;
+
+    const savedByName = {};
+    for (const p of node.customParams) {
+        savedByName[p.name] = p;
+    }
+
+    node.customParams = nodeType.params.map(tpl => {
+        const uiType = paramUiType(tpl.type);
+        const saved = savedByName[tpl.name];
+        let value;
+        if (saved && saved.value !== undefined && saved.value !== null) {
+            value = saved.value;
+        } else if (tpl.value !== undefined && tpl.value !== null) {
+            value = tpl.value;
+        } else {
+            value = uiType === 'number' ? 0 : '';
+        }
+        return {
+            name: tpl.name,
+            description: tpl.description || '',
+            type: uiType,
+            param_type: tpl.type || 'string',
+            value: value
+        };
+    });
+}
+
 function loadNodeTypes() {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         if (window.eel && eel.get_node_types) {
             eel.get_node_types()(
                 function(result) {
                     console.log('Received node types from Python:', result);
-                    if (result.success && result.data && result.data.nodes) {
-                        nodeTypes = result.data.nodes;
-                        renderNodeTypes();
-                        resolve();
+                    if (result.success && result.data) {
+                        applyNodeTypes(result.data);
                     } else {
-                        // Fallback to default node types
-                        console.warn('No node types from Python, using defaults');
-                        nodeTypes = [
-                            { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
-                            { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                            { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                            { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                            { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                            { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'data'}], outputs: [] },
-                            { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
-                        ];
-                        renderNodeTypes();
-                        resolve();
+                        showEmptyNodeTypes('后端未返回节点类型，请检查 viewer 启动日志。');
                     }
+                    resolve();
                 },
                 function(error) {
                     console.error('Failed to get node types from Python:', error);
-                    // Fallback to fetch
-                    fetch('config/nodes.json')
-                        .then(response => response.json())
-                        .then(data => {
-                            nodeTypes = data.nodes;
-                            renderNodeTypes();
-                            resolve();
-                        })
-                        .catch(error => {
-                            console.error('Failed to load node types from fetch:', error);
-                            nodeTypes = [
-                                { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
-                                { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                                { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                                { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                                { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                                { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'data'}], outputs: [] },
-                                { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
-                            ];
-                            renderNodeTypes();
-                            resolve();
-                        });
+                    showEmptyNodeTypes('调用后端获取节点类型失败：' + error);
+                    resolve();
                 }
             );
         } else {
-            // Fallback to fetch when not running via eel
-            fetch('config/nodes.json')
-                .then(response => response.json())
-                .then(data => {
-                    nodeTypes = data.nodes;
-                    renderNodeTypes();
-                    resolve();
-                })
-                .catch(error => {
-                    console.error('Failed to load node types:', error);
-                    nodeTypes = [
-                        { id: 'DataLoader', name: 'DataLoader', icon: '📥', description: '', inputs: [], outputs: [{name: 'data'}] },
-                        { id: 'Processor', name: 'Processor', icon: '⚙️', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                        { id: 'Transformer', name: 'Transformer', icon: '🔄', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                        { id: 'Filter', name: 'Filter', icon: '🔍', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                        { id: 'Aggregator', name: 'Aggregator', icon: '📊', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                        { id: 'Exporter', name: 'Exporter', icon: '📤', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] },
-                        { id: 'CustomNode', name: 'Custom', icon: '✨', description: '', inputs: [{name: 'input'}], outputs: [{name: 'output'}] }
-                    ];
-                    renderNodeTypes();
-                    resolve();
-                });
+            // 未通过 eel 运行（直接打开静态页面）——没有后端注册表，面板为空
+            showEmptyNodeTypes('未运行在编辑器服务中（缺少 eel），请通过 edaglite-viewer 启动。');
+            resolve();
         }
     });
 }
@@ -130,12 +163,29 @@ function createNode(typeId, name, icon) {
         type: typeId,
         name: name,
         icon: icon,
+        // 磁盘缓存目录命名标识（cache/{id}_{cacheName}），与可被覆盖的展示名解耦
+        cacheName: nodeType.cache_name || typeId,
         description: nodeType.description || '',
         x: centerX - 85,
         y: centerY - 45,
-        inputs: JSON.parse(JSON.stringify(nodeType.inputs)),
-        outputs: JSON.parse(JSON.stringify(nodeType.outputs)),
-        customParams: []
+        inputs: JSON.parse(JSON.stringify(nodeType.inputs || [])),
+        outputs: JSON.parse(JSON.stringify(nodeType.outputs || [])),
+        // 从注册类反射出的参数模板播种到节点实例：
+        // type 供属性面板渲染（number/string），param_type 保留给后端（int/float/string）
+        customParams: (nodeType.params || []).map(p => {
+            const uiType = paramUiType(p.type);
+            let value = p.value;
+            if (value === undefined || value === null) {
+                value = uiType === 'number' ? 0 : '';
+            }
+            return {
+                name: p.name,
+                description: p.description || '',
+                type: uiType,
+                param_type: p.type || 'string',
+                value: value
+            };
+        })
     };
     
     nodes.push(node);
@@ -400,11 +450,11 @@ function loadPipeline() {
                     for (let i = 0; i < allNodes.length; i++) {
                         allNodes[i].remove();
                     }
-                    
                     for (let i = 0; i < nodes.length; i++) {
+                        syncNodeCustomParams(nodes[i]);
                         renderNode(nodes[i]);
                     }
-                    
+
                     updateConnections();
                     updateStats();
                     renderConnectionsList();
@@ -748,9 +798,9 @@ function runSingleNode(nodeId) {
     }
 }
 
-function openNodeCache(nodeId, nodeName) {
+function openNodeCache(nodeId, folderName) {
     if (window.eel) {
-        eel.open_node_cache_folder(nodeId, nodeName)();
+        eel.open_node_cache_folder(nodeId, folderName)();
     }
 }
 
@@ -774,6 +824,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             allNodes[i].remove();
                         }
                         for (let i = 0; i < nodes.length; i++) {
+                            syncNodeCustomParams(nodes[i]);
                             renderNode(nodes[i]);
                         }
                         
