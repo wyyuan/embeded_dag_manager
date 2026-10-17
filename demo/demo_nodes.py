@@ -23,10 +23,11 @@ class StudentGenerator(CachedSubprocess):
     outputs = [
         Output("students.csv", description="CSV of generated student records"),
     ]
-    # 参数由节点定义：用户在网页面板只能填值，不能增删/改名/改类型
+    # Params are defined by the node: in the web panel the user can only fill
+    # in values, not add/remove/rename/retype them
     params = [
         Param("count", value=10, param_type="int",
-              description="生成学生的数量"),
+              description="Number of students to generate"),
     ]
 
     def _execute(self):

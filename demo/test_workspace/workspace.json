@@ -18,7 +18,7 @@
       "customParams": [
         {
           "name": "count",
-          "description": "生成学生的数量",
+          "description": "Number of students to generate",
           "type": "number",
           "param_type": "int",
           "value": 15

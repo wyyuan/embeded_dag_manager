@@ -25,8 +25,8 @@ let resizeStartX = 0;
 let resizeStartWidth = 0;
 
 function showEmptyNodeTypes(reason) {
-    // 节点面板唯一直相是后端 NODE_REGISTRY；拿不到类型时给出可操作提示，
-    // 不再用后端并不存在的假节点类型填充面板。
+    // The node panel's sole source of truth is the backend NODE_REGISTRY; when types
+    // cannot be obtained, show an actionable hint instead of inventing fake node types.
     const container = document.getElementById('node-types-container');
     nodeTypes = [];
     if (container) {
@@ -39,20 +39,20 @@ function showEmptyNodeTypes(reason) {
 
 function applyNodeTypes(data) {
     if (!data || !Array.isArray(data.nodes) || data.nodes.length === 0) {
-        showEmptyNodeTypes('没有已注册的节点类型。请确认启动 viewer 前已 import 节点定义（@Pipeline.register_node）。');
+        showEmptyNodeTypes('No node types are registered. Make sure node definitions are imported before starting the viewer (@Pipeline.register_node).');
         return;
     }
     nodeTypes = data.nodes;
     renderNodeTypes();
 }
 
-// 将后端参数类型（int/float/string）转换为属性面板使用的 UI 类型（number/string）
+// Convert backend param types (int/float/string) to the UI types used by the properties panel (number/string)
 function paramUiType(type) {
     return (type === 'int' || type === 'float' || type === 'number') ? 'number' : 'string';
 }
 
-// 将属性面板 UI 类型转换回后端 param_type（int/float/string）；
-// number 保留已有的 int/float 精度，select 与 string 统一落为 string
+// Convert the properties panel UI type back to the backend param_type (int/float/string);
+// number preserves the existing int/float precision, while select and string both become string
 function paramBackendType(uiType, current) {
     if (uiType === 'number') {
         return (current === 'int' || current === 'float') ? current : 'float';
@@ -60,8 +60,8 @@ function paramBackendType(uiType, current) {
     return 'string';
 }
 
-// 归一化节点参数：旧数据可能只有 type 或只有 param_type，这里双向补齐，
-// 保证保存到 workspace.json 的每个参数后端都能读到类型
+// Normalize node params: legacy data may have only type or only param_type; fill in both
+// so the backend can read the type of every param saved to workspace.json
 function normalizeNodeCustomParams(node) {
     if (!Array.isArray(node.customParams)) {
         node.customParams = [];
@@ -73,11 +73,15 @@ function normalizeNodeCustomParams(node) {
     }
 }
 
-// 以注册节点类型（nodeTypes）的参数定义为唯一真相源，合并工作区中节点的参数：
-// - 类型定义新增的参数：按模板播种（带默认值），旧 workspace 打开即可见；
-// - 同名参数：名称/类型/描述以定义为准刷新，仅保留用户已填的 value；
-// - 类型定义中已删除的残留参数：剔除（与后端忽略未知参数的契约一致）。
-// 找不到节点类型时退化为旧数据双向归一化。
+// Merge a workspace node's params using the registered node type's (nodeTypes) param
+// definition as the single source of truth:
+// - Params added in the type definition: seed from the template (with default values)
+//   so they are visible as soon as an old workspace is opened;
+// - Params with the same name: refresh name/type/description from the definition,
+//   keeping only the user-provided value;
+// - Stale params removed from the type definition: drop them (consistent with the
+//   backend contract of ignoring unknown params).
+// Fall back to two-way normalization of legacy data when the node type is not found.
 function syncNodeCustomParams(node) {
     normalizeNodeCustomParams(node);
     const nodeType = nodeTypes.find(t => t.id === node.type);
@@ -118,19 +122,19 @@ function loadNodeTypes() {
                     if (result.success && result.data) {
                         applyNodeTypes(result.data);
                     } else {
-                        showEmptyNodeTypes('后端未返回节点类型，请检查 viewer 启动日志。');
+                        showEmptyNodeTypes('The backend did not return any node types. Check the viewer startup log.');
                     }
                     resolve();
                 },
                 function(error) {
                     console.error('Failed to get node types from Python:', error);
-                    showEmptyNodeTypes('调用后端获取节点类型失败：' + error);
+                    showEmptyNodeTypes('Failed to fetch node types from the backend: ' + error);
                     resolve();
                 }
             );
         } else {
-            // 未通过 eel 运行（直接打开静态页面）——没有后端注册表，面板为空
-            showEmptyNodeTypes('未运行在编辑器服务中（缺少 eel），请通过 edaglite-viewer 启动。');
+            // Not running via eel (static page opened directly) — no backend registry, so the panel is empty
+            showEmptyNodeTypes('Not running in the editor service (missing eel). Start it via edaglite-viewer.');
             resolve();
         }
     });
@@ -163,15 +167,15 @@ function createNode(typeId, name, icon) {
         type: typeId,
         name: name,
         icon: icon,
-        // 磁盘缓存目录命名标识（cache/{id}_{cacheName}），与可被覆盖的展示名解耦
+        // On-disk cache dir naming key (cache/{id}_{cacheName}), decoupled from the overridable display name
         cacheName: nodeType.cache_name || typeId,
         description: nodeType.description || '',
         x: centerX - 85,
         y: centerY - 45,
         inputs: JSON.parse(JSON.stringify(nodeType.inputs || [])),
         outputs: JSON.parse(JSON.stringify(nodeType.outputs || [])),
-        // 从注册类反射出的参数模板播种到节点实例：
-        // type 供属性面板渲染（number/string），param_type 保留给后端（int/float/string）
+        // Seed the node instance from the param templates reflected off the registered class:
+        // type is for the properties panel (number/string), param_type is kept for the backend (int/float/string)
         customParams: (nodeType.params || []).map(p => {
             const uiType = paramUiType(p.type);
             let value = p.value;
@@ -536,7 +540,7 @@ function addLog(message, type = 'info') {
 }
 
 function addLogRaw(message) {
-    // 添加原始输出，与终端完全一致，不添加额外时间戳
+    // Add raw output exactly as in the terminal, without adding an extra timestamp
     const outputContent = document.getElementById('output-content');
     
     if (!outputContent) {
@@ -546,7 +550,7 @@ function addLogRaw(message) {
     const logLine = document.createElement('div');
     logLine.className = 'log-raw';
     
-    // 根据日志内容设置颜色
+    // Set the color based on the log content
     if (message.includes('[ERROR]') || message.includes('Error:')) {
         logLine.className += ' log-error';
     } else if (message.includes('[DONE]')) {
@@ -617,7 +621,7 @@ function initOutputResize() {
     const panel = document.getElementById('output-panel');
     
     handle.addEventListener('mousedown', function(e) {
-        // 如果是收缩状态，不允许拖动
+        // If collapsed, dragging is not allowed
         if (isOutputCollapsed) {
             return;
         }

@@ -7,8 +7,8 @@ classes (nodes with named input/output ports), validating the graph
 with per-node file caching, and optionally editing it in a web UI.
 """
 
-__version__ = "0.4.0"
-__author__ = "Your Name"
+__version__ = "0.5.0"
+__author__ = "Wuyang Yuan"
 
 from .pipeline import (
     Input,

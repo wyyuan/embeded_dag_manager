@@ -1,110 +1,130 @@
 # edaglite
 
-一个**轻量化、可嵌入项目**的 DAG 工作流管理器：用 Python 类定义节点，框架负责图校验（悬空连接 / 端口冲突 / 环检测）、拓扑排序执行、节点级文件缓存，并附带一个 Web 可视化编辑器。
+**English** | [简体中文](README.zh-CN.md)
 
-## 特性
+A **lightweight, embeddable** DAG workflow manager: define nodes as Python classes, let the framework validate the graph (dangling links / port conflicts / cycle detection), execute it in topological order with per-node file caching, and edit it in a bundled web visual editor.
 
-- 🪶 **轻量可嵌入** - 无服务/无数据库，一个 Python 包即可嵌入你自己的项目，以库的方式定义并运行 DAG
-- 🕸️ **真正的 DAG** - 执行前校验悬空连接、重复/冲突边与环形依赖，按拓扑序自动调度（乱序声明自动重排）
-- 🚀 **缓存支持** - 已执行过的节点按缓存目录跳过重复执行
-- 🎨 **可视化编辑器** - 基于 Web 的 DAG 编辑器，参数由节点定义、用户只填值
-- 📦 **模块化设计** - 继承 `CachedSubprocess` 轻松自定义节点
-- 🔧 **单一真相源** - 节点 id/名称/图标/分组/描述与端口/参数全部以 Python 注册类（`@Pipeline.register_node(icon=..., name=..., node_id=...)`）为准自动反射；**不需要 nodes.json 即可使用**，该文件只是可选的 UI 覆盖层，也可用 `--generate-nodes-json` 从注册类一键生成
-- 📝 **日志记录** - 自动记录执行日志到文件
-- ▶️ **单节点运行** - 在编辑器中选中节点单独运行调试
-- 📂 **缓存浏览** - 一键打开节点缓存目录
+## Features
 
-## 安装
+- 🪶 **Lightweight and embeddable** - no service, no database. A single Python package you can embed into your own project to define and run DAGs as a library.
+- 🕸️ **A real DAG** - validates dangling links, duplicate/conflicting edges and cyclic dependencies before execution, then schedules nodes in topological order (out-of-order declarations are reordered automatically).
+- 🚀 **Caching** - nodes that have already run are skipped via the cache directory.
+- 🎨 **Visual editor** - a web-based DAG editor where parameters come from node definitions and users only fill in values.
+- 📦 **Modular design** - subclass `CachedSubprocess` to define custom nodes easily.
+- 🔧 **Single source of truth** - node id/name/icon/group/description plus ports and parameters are all reflected automatically from the Python class registry (`@Pipeline.register_node(icon=..., name=..., node_id=...)`); **no nodes.json is needed**, since that file is only an optional UI overlay. You can also generate it from the registered classes with `--generate-nodes-json`.
+- 📝 **Logging** - execution logs are written to files automatically.
+- ▶️ **Run a single node** - select a node in the editor and run it alone for debugging.
+- 📂 **Cache browsing** - open a node's cache directory with one click.
 
-从 wheel 安装：
+## Installation
+
+From a wheel:
 
 ```bash
-pip install dist/edaglite-0.4.0-py3-none-any.whl
+pip install dist/edaglite-0.5.0-py3-none-any.whl
 ```
 
-## 快速开始
+From PyPI:
 
-### 1. 定义自定义节点
+```bash
+pip install edaglite
+```
+
+## Quick start
+
+### 1. Define a custom node
 
 ```python
 from edaglite import CachedSubprocess, Input, Output, Param, Pipeline
 
-# icon/name/group/description 是面板展示信息，均可省略；
-# node_id 是类型标识（默认取类名），面板与 workspace.json 用它定位类型。
+# icon/name/group/description are panel display metadata and are all optional;
+# node_id is the type identifier (defaults to the class name) used by the panel
+# and workspace.json to look up the type.
 @Pipeline.register_node(icon="📦", name="My Node")
 class MyNode(CachedSubprocess):
-    # 端口与参数声明即为唯一真相，编辑器面板自动反射，无需任何 JSON 配置
+    # Ports and parameters declared here are the single source of truth; the
+    # editor panel reflects them automatically with no JSON configuration needed.
     inputs = [Input("input", description="Input data")]
     outputs = [Output("output", description="Output data")]
     params = [Param("value", description="Some parameter", value="default")]
 
     def _execute(self):
         input_path = self.require_input("input")
-        # 处理...
-        # 输出文件名与输出端口名保持一致（无扩展名）；扩展名由节点按数据类型自定
+        # process...
+        # The output file name matches the output port name (without extension);
+        # the extension is chosen by the node according to its data type.
         with open(self.cache_path("output"), "w") as f:
-            # 写输出
+            # write output
             pass
 ```
 
-**用类型注解声明参数（推荐）**：标量类属性加 `int` / `float` / `str` 注解后，
-装饰器自动生成对应 `Param`（含 `Optional[X]` / `X | None`），无需手写 `params`：
+**Declare parameters with type annotations (recommended)**: annotate scalar class
+attributes with `int` / `float` / `str` and the decorator generates the matching
+`Param` (including `Optional[X]` / `X | None`), so you no longer need to write
+`params` by hand:
 
 ```python
 @Pipeline.register_node(icon="🎓")
 class StudentGenerator(CachedSubprocess):
     outputs = [Output("students.csv")]
 
-    count: int = 10        # 等价于 Param("count", value=10, param_type="int")
+    count: int = 10        # equivalent to Param("count", value=10, param_type="int")
     ratio: float = 0.5     # param_type="float"
     prefix: str = "S"      # param_type="string"
     tag: Optional[str] = None
-    # bool/list/dict 等无对应前端控件的注解会被忽略；
-    # 同名时显式 params=[Param(...)] 优先于注解
+    # Annotations with no matching frontend control (bool/list/dict, ...) are ignored;
+    # when names collide, an explicit params=[Param(...)] takes precedence over annotations
 ```
 
-### 2. 准备 workspace 目录结构
+### 2. Prepare the workspace directory structure
 
-只需要 `workspace.json`（DAG 连接配置）即可。节点面板的全部信息（端口、参数、
-图标、展示名）由框架从 Python 注册类反射，**nodes.json 可以完全不存在**。
-`nodes.json` 只在一种场景下有用：不想改 Python 代码、又想在外部调整图标/展示名，
-它是一个**不参与执行**的 UI 覆盖层，可放在项目级供多个 workspace 共享：
+Only `workspace.json` (the DAG connection configuration) is required. All panel
+information (ports, parameters, icon, display name) is reflected by the framework
+from the registered Python classes, so **nodes.json may be absent entirely**.
+`nodes.json` is useful in exactly one scenario: you do not want to touch the Python
+code but do want to adjust icons/display names externally. It is a **UI overlay
+that does not participate in execution**, and it can live at project level and be
+shared by multiple workspaces:
 
 ```
 my_project/
-├── nodes.json       # 完全可选 - 项目级 UI 覆盖层，所有 workspace 共享
+├── nodes.json       # fully optional - project-level UI overlay shared by all workspaces
 └── workspaces/
     ├── ws_a/
-    │   └── workspace.json   # DAG 连接配置（唯一必需文件）
+    │   └── workspace.json   # DAG connection config (the only required file)
     └── ws_b/
-        ├── nodes.json       # 可选 - workspace 内副本，就近优先，覆盖项目级
+        ├── nodes.json       # optional - a copy inside the workspace, takes precedence
         └── workspace.json
 ```
 
-覆盖层查找顺序：**workspace 目录 → 逐级父目录**（首个命中生效）。
+Overlay lookup order: **the workspace directory, then each parent directory in turn**
+(the first hit wins).
 
-### 3. （可选）nodes.json 覆盖层与动态生成
+### 3. (Optional) nodes.json overlay and dynamic generation
 
-覆盖层只接受纯展示字段，按 `id`（注册类型 id，即默认类名或 `node_id`）匹配
-已注册节点；端口、参数即使写在文件里也会被忽略——它们唯一以 Python 注册类中的
-`inputs` / `outputs` / `params` 声明为准。展示字段的优先级为：
+The overlay accepts display fields only, matched by `id` (the registered type id,
+i.e. the class name or `node_id`) against already-registered nodes; ports and
+parameters are ignored even if present in the file - they are governed solely by the
+`inputs` / `outputs` / `params` declarations in the registered Python classes.
+Display field priority:
 
 ```
-nodes.json 覆盖层  >  register_node(...) 元数据  >  默认值（类名 / 🧩 / docstring 首行）
+nodes.json overlay  >  register_node(...) metadata  >  defaults (class name / 🧩 / first docstring line)
 ```
 
-不想手写时，可让 viewer 从当前注册类**动态生成**一份脚手架（已存在则不会覆盖），
-随后在文件里微调即可：
+Rather than writing it by hand, you can let the viewer **generate** a scaffold from
+the current registered classes (an existing file is never overwritten), then tweak
+it:
 
 ```bash
-# 默认导出到 <workspace>/nodes.json
+# Export to <workspace>/nodes.json by default
 edaglite-viewer --workspace ./my_project/workspaces/ws_a --generate-nodes-json
 
-# 或指定导出路径（如项目级共享文件）
+# Or point at an explicit path (e.g. a project-level shared file)
 edaglite-viewer -w ./ws --generate-nodes-json ../nodes.json
 ```
 
-生成的文件形如：
+The generated file looks like:
 
 ```json
 {
@@ -120,144 +140,151 @@ edaglite-viewer -w ./ws --generate-nodes-json ../nodes.json
 }
 ```
 
-若希望编辑器**完全无视**磁盘上的 nodes.json（比如排查"文件内容与面板不一致"
-问题），加 `--no-overlay` 即可。
+If you want the editor to **completely ignore** the nodes.json on disk (for example
+to diagnose a mismatch between file contents and the panel), pass `--no-overlay`.
 
-> 覆盖层引用了未注册的节点类型时，该条目会被忽略并在启动日志中告警；
-> 没有任何注册节点时，编辑器面板显示空状态提示而不是内置假节点。
-> 自定义 `node_id` 后，用旧 id 保存的 workspace.json 会被视为未注册节点。
+> When the overlay references an unregistered node type, that entry is ignored and a
+> warning is logged at startup. When no node is registered at all, the editor panel
+> shows an empty state instead of built-in fake nodes. After changing `node_id`, a
+> workspace.json saved with the old id is treated as referencing an unregistered node.
 
-### 4. 启动可视化编辑器
+### 4. Start the visual editor
 
 ```bash
-# 指定 workspace 目录；无需 nodes.json，面板直接反射已导入的注册类
+# Point at a workspace directory; no nodes.json needed - the panel reflects imported
+# registered classes directly
 edaglite-viewer --workspace ./my_project/workspaces/ws_a --port 8080
 ```
 
-> **注意**：`edaglite-viewer` 是通用框架入口，不包含任何业务节点。
-> 你需要在启动前导入自定义节点类（通过 `@Pipeline.register_node` 注册），
-> 或者使用启动脚本的方式（参考 `demo/run_demo.py`）。
+> **Note**: `edaglite-viewer` is the generic framework entry point and ships no
+> business nodes. You need to import your custom node classes (registered via
+> `@Pipeline.register_node`) before starting it, or use a launcher script
+> (see `demo/run_demo.py`).
 
-然后打开浏览器访问 http://localhost:8080 即可开始编辑。
+Then open http://localhost:8080 in your browser and start editing.
 
-### 5. 命令行运行 DAG
+### 5. Run the DAG from the command line
 
 ```bash
 edaglite-run --pipeline ./my_workspace/workspace.json
 ```
 
-working folder 自动使用 `workspace.json` 所在目录，不需要额外指定。
+The working folder is taken automatically from the directory containing
+`workspace.json`; no extra flag is needed.
 
-### 6. 清理缓存和日志
+### 6. Clear cache and logs
 
 ```bash
 edaglite-clean --pipeline ./my_workspace/workspace.json
 ```
 
-## 运行示例
+## Running the example
 
-首先需要安装包：
+Install the package first:
 
 ```bash
-pip install dist/edaglite-0.4.0-py3-none-any.whl
+pip install dist/edaglite-0.5.0-py3-none-any.whl
 ```
 
-安装完成后使用启动脚本体验示例：
+Then use the launcher script to try the example:
 
 ```bash
-# 使用启动脚本（自动注册 demo 节点并启动编辑器）
+# Launcher script (registers the demo nodes and starts the editor)
 python demo/run_demo.py
 ```
 
-或者源码运行（无需安装）：
+Or run straight from source (no installation needed):
 
 ```bash
 cd edaglite
 python demo/run_demo.py
 ```
 
-示例中已经包含：
-- `demo/demo_nodes.py` - 示例节点的 Python 实现（图标通过 `register_node(icon=...)` 声明，无 nodes.json）
-- `demo/test_workspace/workspace.json` - 已经连接好的完整 DAG 配置
+The example already includes:
+- `demo/demo_nodes.py` - Python implementations of the sample nodes (icons declared via `register_node(icon=...)`, no nodes.json)
+- `demo/test_workspace/workspace.json` - a fully wired DAG configuration
 
-**如果提示命令找不到**，说明 Python 的 Scripts 目录没有在 PATH 中，可以使用 python -m 方式运行：
+**If the command is not found**, your Python Scripts directory is not on PATH; run it
+through `python -m` instead:
 
 ```bash
 python -m edaglite.pipeline_viewer --workspace ./my_workspace --port 8080
 ```
 
-## 命令行工具
+## Command-line tools
 
-| 命令 | 说明 | 示例 |
+| Command | Description | Example |
 |------|------|------|
-| `edaglite-run` | 运行 DAG | `edaglite-run --pipeline ./workspace/workspace.json [-f]` |
-| `edaglite-viewer` | 启动可视化编辑器 | `edaglite-viewer --workspace ./workspace [--port 8080] [--open] [--no-overlay] [--generate-nodes-json [PATH]]` |
-| `edaglite-clean` | 清理缓存 | `edaglite-clean --pipeline ./workspace/workspace.json` |
+| `edaglite-run` | Run a DAG | `edaglite-run --pipeline ./workspace/workspace.json [-f]` |
+| `edaglite-viewer` | Start the visual editor | `edaglite-viewer --workspace ./workspace [--port 8080] [--open] [--no-overlay] [--generate-nodes-json [PATH]]` |
+| `edaglite-clean` | Clear the cache | `edaglite-clean --pipeline ./workspace/workspace.json` |
 
-### 参数说明
+### Flags
 
 **edaglite-run**:
-- `--pipeline, -p` - workspace.json 文件路径 (必需)
-- `--force, -f` - 强制重新执行，忽略缓存 (可选)
+- `--pipeline, -p` - path to workspace.json (required)
+- `--force, -f` - force re-execution, ignoring the cache (optional)
 
-working folder 自动使用 `workspace.json` 所在目录，不需要额外指定。
+The working folder is taken automatically from the directory containing
+`workspace.json`; no extra flag is needed.
 
 **edaglite-viewer**:
-- `--workspace, -w` - 工作目录（nodes.json 覆盖层沿该目录及父目录链查找）(可选)
-- `--port, -p` - 监听端口，默认 8080 (可选)
-- `--host` - 绑定地址，默认 localhost (可选)
-- `--open, -o` - 自动打开浏览器 (可选)
-- `--no-overlay` - 完全忽略 nodes.json，面板元数据只取注册类 (可选)
-- `--generate-nodes-json [PATH]` - 启动前从注册类导出 nodes.json 脚手架（默认 `<workspace>/nodes.json`，已存在不覆盖）(可选)
+- `--workspace, -w` - workspace directory (the nodes.json overlay is looked up along this directory and its parents) (optional)
+- `--port, -p` - port to listen on, default 8080 (optional)
+- `--host` - address to bind to, default localhost (optional)
+- `--open, -o` - open the browser automatically (optional)
+- `--no-overlay` - ignore nodes.json entirely; panel metadata comes from the registered classes only (optional)
+- `--generate-nodes-json [PATH]` - export a nodes.json scaffold from the registered classes before starting (default `<workspace>/nodes.json`, never overwrites an existing file) (optional)
 
 **edaglite-clean**:
-- `--pipeline, -p` - workspace.json 文件路径 (必需)
+- `--pipeline, -p` - path to workspace.json (required)
 
-## Python API 使用
+## Python API
 
 ```python
 from edaglite import Pipeline, CachedSubprocess
 
-# 从 JSON 加载 DAG
+# Load a DAG from JSON
 pipeline = Pipeline.load_from_json("workspace.json", "./workspace")
 pipeline.run()
 
-# 运行单个节点（按前端节点 ID）
+# Run a single node (by frontend node id)
 pipeline.run_node_by_frontend_id(1)
 ```
 
-## 项目结构
+## Project layout
 
 ```
 edaglite/
-├── edaglite/                   # Python 包（会被打包进 wheel）
-│   ├── __init__.py          # 包初始化，导出公共 API
-│   ├── pipeline.py          # 核心：Pipeline, CachedSubprocess, Context 等
-│   ├── pipeline_viewer.py   # Web 可视化编辑器
-│   ├── run.py               # edaglite-run 命令入口
-│   ├── clean.py             # edaglite-clean 命令入口
-│   └── web/                 # Web 静态资源
+├── edaglite/                # the Python package (packaged into the wheel)
+│   ├── __init__.py          # package init, exports the public API
+│   ├── pipeline.py          # core: Pipeline, CachedSubprocess, Context, ...
+│   ├── pipeline_viewer.py   # web visual editor
+│   ├── run.py               # edaglite-run entry point
+│   ├── clean.py             # edaglite-clean entry point
+│   └── web/                 # web static assets
 │       ├── index.html
 │       └── js/
 │           ├── app.js
 │           ├── connections.js
 │           └── properties.js
-├── demo/                    # 示例工作区（不会打包进 wheel）
-│   ├── demo_nodes.py        # 示例节点 Python 实现（含 register_node 图标元数据）
-│   ├── run_demo.py          # 示例启动脚本
-│   ├── run_pipeline.py      # 命令行运行脚本
-│   ├── view_pipeline.py     # 启动可视化编辑器脚本
+├── demo/                    # example workspace (not packaged into the wheel)
+│   ├── demo_nodes.py        # sample node implementations (with register_node icon metadata)
+│   ├── run_demo.py          # sample launcher script
+│   ├── run_pipeline.py      # command-line run script
+│   ├── view_pipeline.py     # visual editor launcher script
 │   └── test_workspace/
 │       └── workspace.json
 ├── dist/
-│   └── edaglite-0.4.0-py3-none-any.whl
+│   └── edaglite-0.5.0-py3-none-any.whl
 ├── README.md
 └── pyproject.toml
 ```
 
-`demo/` 目录是项目源码中的示例，**不会被打包进 wheel**。安装包后不包含这个目录。
+The `demo/` directory is an example that lives in the source repository and is **not
+packaged into the wheel**. Installed packages do not include it.
 
-## 依赖
+## Requirements
 
 - Python >= 3.8
 - eel >= 0.16.0
@@ -267,6 +294,6 @@ edaglite/
 - colorama >= 0.4.6
 - typing-extensions >= 4.8.0
 
-## 许可证
+## License
 
-MIT
+Apache License 2.0 - see [LICENSE](LICENSE).

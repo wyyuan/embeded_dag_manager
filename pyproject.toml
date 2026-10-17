@@ -1,15 +1,17 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "edaglite"
-version = "0.4.0"
+version = "0.5.0"
 authors = [
-  { name="Your Name", email="your.email@example.com" }
+  { name = "Wuyang Yuan", email = "yuanwuyang@foxmail.com" }
 ]
 description = "A lightweight, embeddable DAG workflow manager with caching and a visual editor"
-license = "MIT"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.8"
 keywords = ["dag", "workflow", "pipeline", "embedded", "caching", "data-processing"]
 classifiers = [
@@ -31,6 +33,18 @@ dependencies = [
     "colorama>=0.4.6",
     "typing-extensions>=4.8.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.0",
+    "twine>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/WuyangYuan/edaglite"
+Repository = "https://github.com/WuyangYuan/edaglite"
+Issues = "https://github.com/WuyangYuan/edaglite/issues"
+Changelog = "https://github.com/WuyangYuan/edaglite/releases"
 
 [project.scripts]
 edaglite-run = "edaglite.run:main"

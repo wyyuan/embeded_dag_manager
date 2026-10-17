@@ -11,17 +11,21 @@ from .pipeline import Pipeline, Context
 # Global workspace directory set from command line
 workspace_dir = None
 
-# 向上查找 nodes.json 时最多跨越的父目录层数（防止误中用户根目录等高层位置）
+# Max number of parent directory levels to traverse upward when searching for
+# nodes.json (prevents accidentally matching high-level locations such as the user home)
 _MAX_NODES_JSON_LEVELS = 8
 
 
 def _find_nodes_json(start_dir):
-    """按 ``workspace → 父目录链`` 的顺序查找 nodes.json，返回首个命中的绝对路径。
+    """Search for nodes.json along the ``workspace -> parent directory chain``,
+    returning the absolute path of the first hit.
 
-    查找的第一站就是 workspace 目录本身，因此"每个 workspace 放一份
-    nodes.json"的旧布局继续生效（就近优先，向后兼容）；workspace 内没有时，
-    再逐级向上到项目级目录，使多个 workspace 可以共享同一份节点类型面板
-    定义。到达盘符根目录或超过层数上限仍未找到时返回 None。
+    The first stop is the workspace directory itself, so the old layout of
+    "one nodes.json per workspace" keeps working (nearest first, backward
+    compatible); when the workspace has none, the search continues up level by
+    level to a project-level directory, letting multiple workspaces share the
+    same node type palette definition. Returns None when the drive root is
+    reached or the level limit is exceeded without a hit.
     """
     if not start_dir:
         return None
@@ -31,23 +35,26 @@ def _find_nodes_json(start_dir):
         if os.path.isfile(candidate):
             return candidate
         parent = os.path.dirname(cur)
-        if parent == cur:  # 已到达盘符根目录
+        if parent == cur:  # reached the drive root
             break
         cur = parent
     return None
 
 
-# 覆盖层允许提供的纯 UI 字段（按节点类型名匹配；端口与参数一律以 Python 注册类为准）
+# Pure UI fields the overlay is allowed to provide (matched by node type name;
+# ports and params always come from the Python registered class)
 _OVERLAY_UI_KEYS = ("name", "icon", "group", "description")
 _DEFAULT_ICON = "🧩"
 
 
 def _load_overlay(workspace):
-    """读取可选的 nodes.json UI 覆盖层，返回 {节点类型名: UI 配置}。
+    """Load the optional nodes.json UI overlay, returning {node type name: UI config}.
 
-    nodes.json 不再是端口/参数的真相源，仅可提供展示名、图标、分组、描述
-    等 UI 元数据；其中多写的 inputs/outputs/params 会被忽略。文件不存在或
-    解析失败时返回空 dict（此时面板全部字段来自 Python 注册类）。
+    nodes.json is no longer the source of truth for ports/params; it may only
+    provide UI metadata such as display name, icon, group and description; any
+    extra inputs/outputs/params written into it are ignored. Returns an empty
+    dict when the file does not exist or fails to parse (in which case all
+    palette fields come from the Python registered classes).
     """
     path = _find_nodes_json(workspace)
     if not path:
@@ -67,22 +74,26 @@ def _load_overlay(workspace):
 
 
 def _build_node_types(workspace, use_overlay=True):
-    """从 ``Pipeline.NODE_REGISTRY`` 反射生成编辑器节点面板数据。
+    """Build editor node palette data by reflecting ``Pipeline.NODE_REGISTRY``.
 
-    Python 注册类是唯一直相：面板上的端口、参数、描述全部来自实例化后的
-    节点对象（类级声明与 ``__init__`` 动态添加两种写法都能正确反映）；
-    展示字段的优先级为 nodes.json 覆盖层 > ``register_node(...)`` 元数据 >
-    默认值（类名 / 🧩 / docstring 首行）。``use_overlay=False`` 时完全忽略
-    nodes.json，面板信息全部来自注册类——此时根本不需要 nodes.json 存在。
+    The Python registered class is the single source of truth: the ports, params
+    and description shown on the palette all come from the instantiated node
+    object (both class-level declarations and dynamic additions in ``__init__``
+    are reflected correctly); the display field priority is nodes.json overlay >
+    ``register_node(...)`` metadata > defaults (class name / 🧩 / first line of
+    the docstring). When ``use_overlay=False`` nodes.json is ignored entirely and
+    all palette info comes from the registered classes -- in that case nodes.json
+    does not need to exist at all.
 
-    实例化使用临时工作目录的一次性 Context，避免仅仅打开编辑器就在真实
-    workspace 下创建 cache 目录；实例化失败的单个节点被跳过并告警，不影响
-    其余类型展示。
+    Instantiation uses a one-off Context with a temporary working directory, to
+    avoid creating a cache directory under the real workspace just for opening
+    the editor; a single node that fails to instantiate is skipped with a warning
+    and does not affect the display of the remaining types.
 
     Returns:
         ``{"nodes": [ {id,name,icon,group,description,cache_name,
-        inputs,outputs,params}, ... ]}``，顺序与节点注册顺序一致；没有任何
-        已注册类型时 nodes 为空列表。
+        inputs,outputs,params}, ... ]}``, in the same order as node registration;
+        nodes is an empty list when there are no registered types.
     """
     overlay = _load_overlay(workspace) if use_overlay else {}
     result = {"nodes": []}
@@ -104,7 +115,7 @@ def _build_node_types(workspace, use_overlay=True):
             doc_desc = ""
             if node_cls.__doc__:
                 doc_desc = node_cls.__doc__.strip().splitlines()[0].strip()
-            # register_node(name/icon/group/description=...) 提供的类级元数据
+            # Class-level metadata provided by register_node(name/icon/group/description=...)
             meta = getattr(node_cls, '_node_meta', {})
             default_desc = inst.description or meta.get("description") or doc_desc
             ui = overlay.get(type_name, {})
@@ -115,15 +126,17 @@ def _build_node_types(workspace, use_overlay=True):
                 "icon": ui.get("icon") or meta.get("icon") or _DEFAULT_ICON,
                 "group": ui.get("group") or meta.get("group") or "",
                 "description": ui.get("description") or default_desc,
-                # 磁盘缓存目录命名标识 cache/{前端id}_{cache_name}，默认等于
-                # 类名；与展示名解耦，前端"打开缓存目录"必须回传此值
+                # Disk cache directory naming identifier cache/{frontend id}_{cache_name},
+                # defaults to the class name; decoupled from the display name, the
+                # frontend "open cache folder" must pass this value back
                 "cache_name": inst.name,
                 "inputs": [{"name": p.name, "description": p.description}
                            for p in inst.inputs],
                 "outputs": [{"name": p.name, "description": p.description}
                             for p in inst.outputs],
-                # type 沿用 nodes.json 契约（int/float/string）；
-                # 前端建节点时会据此同时生成 UI 的 type 与后端的 param_type
+                # type follows the nodes.json contract (int/float/string);
+                # when the frontend creates a node it generates both the UI type
+                # and the backend param_type from this
                 "params": [{"name": p.name,
                             "description": p.description,
                             "type": p.param_type,
@@ -135,16 +148,18 @@ def _build_node_types(workspace, use_overlay=True):
 
     extra = [k for k in overlay if k not in Pipeline.NODE_REGISTRY]
     if extra:
-        print(f"[WARN] nodes.json 覆盖层中存在未注册节点类型，已忽略: {extra}")
+        print(f"[WARN] nodes.json overlay contains unregistered node types, ignored: {extra}")
     return result
 
 
 def _export_overlay_scaffold(target_path, workspace):
-    """从当前注册表导出一份纯 UI 覆盖层 nodes.json（忽略任何已有覆盖层）。
+    """Export a pure UI overlay nodes.json from the current registry (ignoring any existing overlay).
 
-    导出内容只有 id/name/icon/group/description——端口与参数永远以 Python
-    注册类为准，因此脚手架里不包含它们。返回导出的节点类型数。
-    已存在的目标文件由调用方决定是否跳过，本函数不做覆盖保护。
+    The exported content contains only id/name/icon/group/description -- ports and
+    params always come from the Python registered classes, so the scaffold does
+    not include them. Returns the number of exported node types.
+    Whether to skip an already-existing target file is decided by the caller; this
+    function does not guard against overwriting.
     """
     data = _build_node_types(workspace, use_overlay=False)
     scaffold = {"nodes": []}
@@ -170,26 +185,29 @@ def run_viewer(host='localhost', port=8080, open_browser=False, workspace=None,
     """Initialize and start the pipeline viewer web UI.
 
     Args:
-        use_overlay: 是否加载 nodes.json UI 覆盖层；False 时面板元数据完全
-            来自 Python 注册类（适用于彻底不使用 nodes.json 的项目）。
-        generate_nodes_json: 启动前把注册类反射结果导出为 nodes.json 脚手架。
-            None 表示不导出；空字符串表示导出到 ``<workspace>/nodes.json``；
-            非空字符串作为目标路径。目标已存在时不会被覆盖。
+        use_overlay: whether to load the nodes.json UI overlay; when False the
+            palette metadata comes entirely from the Python registered classes
+            (for projects that do not use nodes.json at all).
+        generate_nodes_json: export the reflection result of the registered
+            classes as a nodes.json scaffold before starting. None means no
+            export; an empty string means export to ``<workspace>/nodes.json``;
+            a non-empty string is used as the target path. An existing target is
+            not overwritten.
     """
     global workspace_dir
     workspace_dir = workspace
 
-    # 可选：启动时动态生成 nodes.json 脚手架（仅当目标不存在时）
+    # Optional: dynamically generate a nodes.json scaffold at startup (only when the target does not exist)
     if generate_nodes_json is not None:
         target = generate_nodes_json or (
             os.path.join(workspace, 'nodes.json') if workspace else None)
         if not target:
-            print("[WARN] --generate-nodes-json 需要显式路径（当前未指定 workspace），已跳过")
+            print("[WARN] --generate-nodes-json requires an explicit path (no workspace specified), skipped")
         elif os.path.exists(target):
-            print(f"[INFO] nodes.json 已存在，保留不覆盖: {os.path.abspath(target)}")
+            print(f"[INFO] nodes.json already exists, keeping it without overwriting: {os.path.abspath(target)}")
         else:
             count = _export_overlay_scaffold(target, workspace)
-            print(f"[INFO] 已从注册类生成 nodes.json 脚手架（{count} 个类型）: "
+            print(f"[INFO] Generated nodes.json scaffold from registered classes ({count} type(s)): "
                   f"{os.path.abspath(target)}")
     
     # Get the directory where web files are located
@@ -211,7 +229,7 @@ def run_viewer(host='localhost', port=8080, open_browser=False, workspace=None,
 
     @eel.expose
     def get_node_types():
-        """反射已注册的 Python 节点类生成面板，nodes.json 仅作 UI 覆盖层。"""
+        """Build the palette by reflecting registered Python node classes; nodes.json only serves as a UI overlay."""
         print("=== get_node_types called ===")
         try:
             data = _build_node_types(workspace_dir, use_overlay=use_overlay)
@@ -359,9 +377,10 @@ def run_viewer(host='localhost', port=8080, open_browser=False, workspace=None,
     def open_node_cache_folder(node_id, folder_name):
         """Open the cache folder for a specific node in file explorer.
 
-        ``folder_name`` 是节点类型的磁盘命名标识（面板数据的 cache_name，
-        默认类名），不能用可被 register_node/nodes.json 改写的展示名，否则
-        会定位到错误的缓存目录。
+        ``folder_name`` is the disk naming identifier of the node type (the
+        cache_name in the palette data, defaulting to the class name); the display
+        name, which can be overridden by register_node/nodes.json, must not be
+        used, otherwise the wrong cache directory would be located.
         """
         print(f"=== open_node_cache_folder called for node: {node_id}_{folder_name} ===")
         if not workspace_dir:

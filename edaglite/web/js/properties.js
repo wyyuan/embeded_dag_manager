@@ -60,7 +60,7 @@ function showProperties() {
         }
 
         if (!customParamsHtml) {
-            customParamsHtml = '<div style="font-size: 11px; color: var(--text-muted, #888); padding: 4px 2px;">该节点没有可配置参数</div>';
+            customParamsHtml = '<div style="font-size: 11px; color: var(--text-muted, #888); padding: 4px 2px;">This node has no configurable parameters</div>';
         }
 
         panel.innerHTML = `
@@ -99,8 +99,9 @@ function showProperties() {
     panel.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👆</div><div>Select a node or connection</div></div>';
 }
 
-// 参数由节点 Python 定义（register_node/类型注解），这里只允许用户填写值：
-// 参数名与类型只读展示，不提供新增、删除、改名、改类型的入口。
+// Params are defined by the node's Python (register_node/type annotations); here the user
+// only fills in values. Param name and type are read-only, with no UI to add, delete,
+// rename, or retype them.
 function renderCustomParam(param, index) {
     let valueInput = '';
 
@@ -112,7 +113,7 @@ function renderCustomParam(param, index) {
             break;
         }
         case 'select': {
-            // 兼容旧 workspace 中保存的 select 参数：仅允许在既有选项间选值
+            // Compatible with select params saved in legacy workspaces: only allow choosing among existing options
             let options = '';
             if (param.options && Array.isArray(param.options)) {
                 for (let i = 0; i < param.options.length; i++) {
@@ -143,7 +144,7 @@ function renderCustomParam(param, index) {
 function updateCustomParam(index, field, value) {
     if (!selectedNode || !selectedNode.customParams) return;
 
-    // 仅允许更新值；名称与类型以节点定义为准
+    // Only the value may be updated; name and type follow the node definition
     if (field !== 'value') return;
 
     selectedNode.customParams[index][field] = value;
